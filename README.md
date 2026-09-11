@@ -1,1 +1,114 @@
 # my-learning-cloud-support-poc-agentcore
+
+Proof of concept for My Learning Cloud (MLC). The tool reads an escalated support
+ticket from the Lumis platform, finds similar past tickets, and drafts a reply for
+a human support agent to review. Nothing is sent to a customer.
+
+Funded by AWS ($15,000, covers build and compute). Lambert Labs creates a
+separate AWS account, gives MLC admin users in it, and hands the account to MLC
+at the end. Sources: AI Assessment Report, workshop notes 2026-07-20, deep dive
+2026-08-11, kick-off 2026-09-07. All are in the project Google Drive folder.
+
+## Architecture
+
+```
+super-admin.tickets.json ──► etl/split_tickets.py ──► out/{full,customer}/<ticketId>.md
+                                                       + .metadata.json sidecars
+                                                              │  aws s3 sync
+                                                              ▼
+                                                     S3 bucket ──► Managed Knowledge Base
+                                                                    (S3 connector)
+new ticket ──► demo/draft_reply.py ──► RetrieveAndGenerate + Guardrail ──► console
+```
+
+| Area | Decision | Why |
+| --- | --- | --- |
+| Region | `eu-west-2` London | UK or Ireland data residency. Every service below is available there (verified 2026-09-11). |
+| Retrieval | Bedrock **Managed** Knowledge Base, S3 connector | $5 per GB stored per month, $1 per 1,000 retrievals. Embedding model, reranker and hybrid search are included. Nothing to provision. The corpus is well under 1 GB. |
+| Chunking experiment | Ingest each ticket twice: full thread and customer side only. Tag each file with `variant` metadata. Filter on `variant` at retrieval. | Compares both strategies against one index. Fall back to two Knowledge Bases if the filter is awkward. |
+| Query API | `RetrieveAndGenerate` with a Guardrail attached | Least code. Returns the draft and citations in one call. |
+| Generation model | Claude Sonnet, `eu.` inference profile | Draft quality. The `eu.` profile keeps inference inside the EU. Try Haiku if cost matters. |
+| PII | Bedrock Guardrail, PII set to `ANONYMIZE`. Apply with `ApplyGuardrail` during ETL and again at query time. | Redaction at ingestion keeps PII out of the index. Query-time redaction covers the new ticket. |
+| Runtime | Plain Bedrock API calls from Python. No AgentCore, no Strands, no Bedrock Agents. | The tool is a fixed pipeline with no tool loop, no session and no external caller. |
+| Infrastructure | One CloudFormation template, `infrastructure/template.yaml` | Five resources. `AWS::Bedrock::KnowledgeBase` supports `ManagedKnowledgeBaseConfiguration`. |
+| Output | Text in the console. No write-back to Lumis. | Kick-off decision. |
+| Corpus scope | Escalated tickets only, including tickets assigned to developers | Kick-off decision. |
+| Bad tickets | Keep all. Store `reopened` as metadata. Test with and without a filter. | Scott's "closed twice" heuristic is a signal, not a verdict. |
+
+Add AgentCore only when Lumis calls the tool over HTTP, when the agent needs the
+Lumis API through a Gateway with permissions separate from a user token, or when
+you want AgentCore Evaluations.
+
+## Findings
+
+- The managed Knowledge Base offers built-in or fixed-size chunking only. One
+  vector per ticket is not guaranteed. Use a large fixed size and check the chunk
+  count after ingestion.
+- Managed Knowledge Base metadata filters support `equals`, `in`, `notIn` and
+  range operators. `startsWith` and `stringContains` are not supported.
+- The S3 connector treats one file as one document. The 27 MB export must be
+  split into one file per ticket with a `<file>.metadata.json` sidecar.
+- Guardrail PII masking applies to the API response only. Model invocation logs,
+  if enabled, hold unmasked text. Keep invocation logging off or encrypt the log
+  group.
+- Re-ingesting a file that already exists in a Knowledge Base fails. Delete the
+  document first. The Boomcoms PoC hit this.
+- Tickets combine `thread` (customer), `adminThread` (MLC, `note: true` means
+  internal), `parentThread` (parent tenant) and sometimes `systemThread`. Sort by
+  `timestamp`. Drop notes and system messages. The `howto` / `bug` type field was
+  never used.
+
+## Requirements
+
+`implemented` = built and shown to work. `validated` = not built, but the docs or
+a spike show it works. `out` = not possible or out of scope.
+
+| # | Requirement | Status | Note |
+| --- | --- | --- | --- |
+| R1 | Split the export into one document per ticket with metadata | implemented | `etl/split_tickets.py`, tested on one sample ticket. Not yet run on the full export. |
+| R2 | Ingest full-thread and customer-only variants side by side | validated | Metadata filter on `variant`. Confirm at retrieval. |
+| R3 | Redact PII before ingestion and at query time | validated | `ApplyGuardrail` and `guardrailConfiguration` on `RetrieveAndGenerate`. |
+| R4 | Retrieve similar past tickets for a new ticket | validated | Managed Knowledge Base, hybrid search included. |
+| R5 | Draft a reply with citations to source ticket IDs | validated | `RetrieveAndGenerate` returns citations. Ticket ID comes from metadata. |
+| R6 | Classify the ticket: `howto`, `tenant-data`, `bug`, `unclear` | validated | Custom prompt on `RetrieveAndGenerate` or a second Converse call. |
+| R7 | Signpost for `tenant-data` tickets: name the screen and the data to request | validated | Prompt only. |
+| R8 | Human review of every draft | validated | Output is console text. Nothing is sent. |
+| R9 | Data stays in UK or EU | validated | `eu-west-2` plus `eu.` inference profile. |
+| R10 | Evaluate drafts against real MLC replies on held-out tickets | validated | Manual review first. LLM judge later. |
+| R11 | Keep idle infra cost near zero | validated | Managed Knowledge Base bills storage and retrievals only. |
+| R12 | Answer questions that need live tenant data from Lumis | out | No Lumis API in scope. The draft asks the customer for the data. |
+| R13 | Write suggestions back into Lumis | out | Kick-off decision. |
+| R14 | Handle customer-specific jargon | out | Revisit after evaluation. Tenant metadata filter is the first idea. |
+| R15 | Daily re-sync of new tickets | out | Manual re-run of ETL and sync job in the PoC. |
+| R16 | Ground-truth knowledge base or how-to wiki | out | Deferred at the deep dive. |
+
+## Repo layout
+
+| Path | What |
+| --- | --- |
+| `etl/split_tickets.py` | Splits the export into per-ticket documents and metadata sidecars |
+| `tests/` | Self-check for the ETL, with one fixture ticket |
+| `infrastructure/template.yaml` | CloudFormation: bucket, Knowledge Base role, Knowledge Base, data source, Guardrail. Not written yet. |
+| `demo/` | One script per experiment. Not written yet. |
+| `data/` | Local ticket export. Git ignores it. |
+| `out/` | ETL output. Git ignores it. |
+
+## Getting started
+
+1. Download `super-admin.tickets.json` from the project Drive folder to
+   `data/`. The password is in the Teams chat. Never commit it.
+2. Run the ETL:
+
+   ```shell
+   python3 etl/split_tickets.py data/super-admin.tickets.json out/
+   ```
+
+3. Upload: `aws s3 sync out/ s3://<bucket>/tickets/` then start a sync job on
+   the Knowledge Base data source.
+
+Steps 3 onwards need the PoC account, which is not provisioned yet.
+
+## Deploying
+
+Not yet. The plan is `aws cloudformation deploy` of `infrastructure/template.yaml`
+into the PoC account in `eu-west-2`, run by hand.

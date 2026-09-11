@@ -1,0 +1,76 @@
+"""Split the Lumis ticket export into one Knowledge Base document per ticket.
+
+Usage: python3 etl/split_tickets.py data/super-admin.tickets.json out/
+
+Writes out/<variant>/<ticketId>.md and a .metadata.json sidecar for each,
+where variant is "full" (whole conversation) or "customer" (subject and
+customer messages only). Upload with `aws s3 sync out/ s3://<bucket>/tickets/`.
+"""
+
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+ESCALATION_BOILERPLATE = (
+    "This ticket was submitted by an administrator and was therefore "
+    "automatically escalated to My Learning Cloud"
+)
+AUTHORS = {"thread": "Customer", "adminThread": "MLC", "parentThread": "Parent tenant"}
+
+
+def messages(ticket):
+    """Visible messages across all threads, oldest first."""
+    out = []
+    for key, author in AUTHORS.items():
+        for m in ticket.get(key) or []:
+            if m.get("note"):
+                continue
+            text = m.get("message", "").replace(ESCALATION_BOILERPLATE, "").strip()
+            if text:
+                out.append((m["timestamp"], author, text))
+    return sorted(out, key=lambda m: m[0])
+
+
+def render(ticket, msgs):
+    day = lambda ts: datetime.fromtimestamp(ts, timezone.utc).date().isoformat()
+    lines = [f"# {ticket['subject'].strip()}", ""]
+    lines += [f"**{author}** ({day(ts)}):\n{text}\n" for ts, author, text in msgs]
+    return "\n".join(lines)
+
+
+def metadata(ticket, variant, msgs):
+    notes = [m.get("message", "") for m in ticket.get("adminThread") or [] if m.get("note")]
+    return {
+        "metadataAttributes": {
+            "ticketId": ticket["ticketId"],
+            "tenant": ticket["tenant"],
+            "variant": variant,
+            "priority": ticket.get("priority", ""),
+            "supportCategory": ticket.get("supportCategory", ""),
+            "created": ticket["created"]["timestamp"],
+            "closed": (ticket.get("closed") or {}).get("timestamp", 0),
+            "reopened": sum("Ticket closed" in n for n in notes) > 1,
+            "hasMlcReply": any(a == "MLC" for _, a, _ in msgs),
+        }
+    }
+
+
+def split(tickets, out_dir):
+    for ticket in tickets:
+        msgs = messages(ticket)
+        variants = {"full": msgs, "customer": [m for m in msgs if m[1] == "Customer"]}
+        for variant, subset in variants.items():
+            path = Path(out_dir, variant, f"{ticket['ticketId']}.md")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(render(ticket, subset))
+            path.with_suffix(".md.metadata.json").write_text(
+                json.dumps(metadata(ticket, variant, msgs), indent=2)
+            )
+
+
+if __name__ == "__main__":
+    src, out = sys.argv[1], sys.argv[2]
+    tickets = json.loads(Path(src).read_text())
+    split(tickets, out)
+    print(f"{len(tickets)} tickets -> {out}")

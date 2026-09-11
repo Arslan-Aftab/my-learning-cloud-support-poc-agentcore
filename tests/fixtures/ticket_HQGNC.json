@@ -1,0 +1,22 @@
+[{
+  "tenant": "bb-luton",
+  "subject": "unable to add training course ",
+  "priority": "minor",
+  "escalated": true,
+  "supportCategory": "awaiting_customer",
+  "created": {"timestamp": 1787928261, "tenant": "bb-luton"},
+  "closed": {"timestamp": 1788355425, "tenant": "super-admin"},
+  "ticketId": "HQGNC",
+  "thread": [
+    {"message": "not showing error \n\nThis ticket was submitted by an administrator and was therefore automatically escalated to My Learning Cloud", "timestamp": 1787928589},
+    {"message": "Hi,\n\nI am unable to add the Fire Warden/Fire Marshal training for the selected staff members. The Fire Warden course is not appearing as an option when I search for it.\n\nThis ticket was submitted by an administrator and was therefore automatically escalated to My Learning Cloud", "timestamp": 1787928589},
+    {"message": "thank you for your response, let me give this a go!!", "timestamp": 1787929348}
+  ],
+  "adminThread": [
+    {"message": "Assignment changed to Jessica Coleman", "timestamp": 1787928640, "note": true},
+    {"message": "Hi Zainab,\n\nThe Fire Warden e-Learning module has not yet been assigned as part of a topic. Admin > Manage Assignments > Topics > Fire > Question 4 of 5 > drag the module into Chosen Components > Save Changes.\n\nKindest,\nJess", "timestamp": 1787929198},
+    {"message": "Ticket closed", "timestamp": 1787929208, "note": true},
+    {"message": "Ticket closed", "timestamp": 1788355425, "note": true}
+  ],
+  "parentThread": []
+}]
