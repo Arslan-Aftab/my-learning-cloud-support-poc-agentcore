@@ -76,30 +76,6 @@ you want AgentCore Evaluations.
   `timestamp`. Drop notes and system messages. The `howto` / `bug` type field was
   never used.
 
-## Requirements
-
-`implemented` = built and shown to work. `validated` = not built, but the docs or
-a spike show it works. `out` = not possible or out of scope.
-
-| # | Requirement | Status | Note |
-| --- | --- | --- | --- |
-| R1 | Split the export into one document per ticket with metadata | implemented | `etl/split_tickets.py`. 6,950 tickets, 13,900 documents, 11 MB. |
-| R2 | Ingest full-thread and customer-only variants side by side | implemented | `equals` filter on `variant` returned customer chunks only (T2, 2026-09-14). |
-| R3 | Redact PII in the drafted reply | partial | The Guardrail unit check anonymised name, phone and email (T4, 2026-09-14). The query-time path needs `demo/draft_reply.py`. |
-| R4 | Retrieve similar past tickets for a new ticket | implemented | `Retrieve` on the 20 ticket sample ranked the matching ticket first at score 0.75 (T1, 2026-09-14). |
-| R5 | Draft a reply with citations to source ticket IDs | validated | `Retrieve` returns chunks with `metadata.ticketId`. The Converse prompt asks the model to cite them. |
-| R6 | Classify the ticket: `howto`, `tenant-data`, `bug`, `unclear` | validated | Same Converse call as R5, or a second cheaper one. |
-| R7 | Signpost for `tenant-data` tickets: name the screen and the data to request | validated | Prompt only. |
-| R8 | Human review of every draft | validated | Output is console text. Nothing is sent. |
-| R9 | Data stays in UK or EU | validated | `eu-west-2` plus `eu.` inference profile. |
-| R10 | Evaluate drafts against real MLC replies on held-out tickets | validated | Manual review first. LLM judge later. |
-| R11 | Keep idle infra cost near zero | validated | Managed Knowledge Base bills storage and retrievals only. |
-| R12 | Answer questions that need live tenant data from Lumis | out | No Lumis API in scope. The draft asks the customer for the data. |
-| R13 | Write suggestions back into Lumis | out | Kick-off decision. |
-| R14 | Handle customer-specific jargon | out | Revisit after evaluation. Tenant metadata filter is the first idea. |
-| R15 | Daily re-sync of new tickets | out | Manual re-run of ETL and sync job in the PoC. |
-| R16 | Ground-truth knowledge base or how-to wiki | out | Deferred at the deep dive. |
-
 ## Repo layout
 
 | Path | What |
@@ -213,18 +189,19 @@ ingestion result and one retrieval, then drop `--limit` and load everything.
 
 ## Testing
 
-Each test has one meaning. The table maps tests to requirements. Tick a
-requirement when its tests pass and record the date in the requirements table.
+Each test has one meaning. The table below is the only place that maps tests
+to requirements. When a test passes, record the date and the evidence in the
+[requirements](#requirements) table at the end of this file.
 
-| Test | Meaning | Requirements | Status |
-|---|---|---|---|
-| T1 | Retrieve past tickets for a question | R4 | passed 2026-09-14 |
-| T2 | Retrieve with a metadata filter | R2 | passed 2026-09-14 |
-| T3 | Ask a question, get a drafted reply with citations | R5, R8 | script not written |
-| T4 | Ask a question whose sources hold PII, get a redacted draft | R3 | guardrail unit check passed 2026-09-14 |
-| T5 | Classify and signpost | R6, R7 | script not written |
-| T6 | Compare a draft with the real MLC reply on a held-out ticket | R10 | not designed |
-| T7 | Confirm region and idle cost | R9, R11 | not run |
+| Test | Meaning | Requirements |
+|---|---|---|
+| T1 | Retrieve past tickets for a question | R4 |
+| T2 | Retrieve with a metadata filter | R2 |
+| T3 | Ask a question, get a drafted reply with citations | R5, R8 |
+| T4 | Ask a question whose sources hold PII, get a redacted draft | R3 |
+| T5 | Classify and signpost | R6, R7 |
+| T6 | Compare a draft with the real MLC reply on a held-out ticket | R10 |
+| T7 | Confirm region and idle cost | R9, R11 |
 
 ### T1 Retrieve
 
@@ -290,3 +267,29 @@ Compare the draft with the real reply by hand. Design the judge later.
 Confirm the Knowledge Base ARN and the model ARN in `.env` are `eu-west-2`
 and `eu.`. Read the bill after a quiet week and expect storage and retrieval
 charges only.
+
+## Requirements
+
+`implemented` = built and shown to work. `partial` = part of the path is
+proven. `validated` = not built, but the docs or a spike show it works. `out` =
+not possible or out of scope. The Note column holds the evidence and the test
+that produced it.
+
+| # | Requirement | Status | Note |
+| --- | --- | --- | --- |
+| R1 | Split the export into one document per ticket with metadata | implemented | `etl/split_tickets.py`. 6,950 tickets, 13,900 documents, 11 MB. |
+| R2 | Ingest full-thread and customer-only variants side by side | implemented | `equals` filter on `variant` returned customer chunks only (T2, 2026-09-14). |
+| R3 | Redact PII in the drafted reply | partial | The Guardrail unit check anonymised name, phone and email (T4, 2026-09-14). The query-time path needs `demo/draft_reply.py`. |
+| R4 | Retrieve similar past tickets for a new ticket | implemented | `Retrieve` on the 20 ticket sample ranked the matching ticket first at score 0.75 (T1, 2026-09-14). |
+| R5 | Draft a reply with citations to source ticket IDs | validated | `Retrieve` returns chunks with `metadata.ticketId`. The Converse prompt asks the model to cite them. |
+| R6 | Classify the ticket: `howto`, `tenant-data`, `bug`, `unclear` | validated | Same Converse call as R5, or a second cheaper one. |
+| R7 | Signpost for `tenant-data` tickets: name the screen and the data to request | validated | Prompt only. |
+| R8 | Human review of every draft | validated | Output is console text. Nothing is sent. |
+| R9 | Data stays in UK or EU | validated | `eu-west-2` plus `eu.` inference profile. |
+| R10 | Evaluate drafts against real MLC replies on held-out tickets | validated | Manual review first. LLM judge later. |
+| R11 | Keep idle infra cost near zero | validated | Managed Knowledge Base bills storage and retrievals only. |
+| R12 | Answer questions that need live tenant data from Lumis | out | No Lumis API in scope. The draft asks the customer for the data. |
+| R13 | Write suggestions back into Lumis | out | Kick-off decision. |
+| R14 | Handle customer-specific jargon | out | Revisit after evaluation. Tenant metadata filter is the first idea. |
+| R15 | Daily re-sync of new tickets | out | Manual re-run of ETL and sync job in the PoC. |
+| R16 | Ground-truth knowledge base or how-to wiki | out | Deferred at the deep dive. |
