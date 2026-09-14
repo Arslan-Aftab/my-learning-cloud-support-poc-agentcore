@@ -28,7 +28,7 @@ new ticket ──► demo/draft_reply.py ──► RetrieveAndGenerate + Guardra
 | Chunking experiment | Ingest each ticket twice: full thread and customer side only. Tag each file with `variant` metadata. Filter on `variant` at retrieval. | Compares both strategies against one index. Fall back to two Knowledge Bases if the filter is awkward. |
 | Query API | `RetrieveAndGenerate` with a Guardrail attached | Least code. Returns the draft and citations in one call. |
 | Generation model | Claude Sonnet, `eu.` inference profile | Draft quality. The `eu.` profile keeps inference inside the EU. Try Haiku if cost matters. |
-| PII | Bedrock Guardrail, PII set to `ANONYMIZE`. Apply with `ApplyGuardrail` during ETL and again at query time. | Redaction at ingestion keeps PII out of the index. Query-time redaction covers the new ticket. |
+| PII | Bedrock Guardrail, PII set to `ANONYMIZE` on model output only. The index holds the tickets as written. | The Knowledge Base stays faithful to the source. The draft reply is what leaves the tool, so redaction sits there. Input redaction was tried and dropped on 2026-09-14. |
 | Runtime | Plain Bedrock API calls from Python. No AgentCore, no Strands, no Bedrock Agents. | The tool is a fixed pipeline with no tool loop, no session and no external caller. |
 | Infrastructure | One CloudFormation template, `infrastructure/template.yaml` | Five resources. `AWS::Bedrock::KnowledgeBase` supports `ManagedKnowledgeBaseConfiguration`. |
 | Output | Text in the console. No write-back to Lumis. | Kick-off decision. |
@@ -54,7 +54,7 @@ you want AgentCore Evaluations.
 - A managed Knowledge Base rejects `vectorSearchConfiguration` at query
   time. Use `managedSearchConfiguration` for filters and result counts.
 - `Action: ANONYMIZE` alone anonymises model output only. `ApplyGuardrail`
-  with `source INPUT` returns `NONE`. Set `InputAction` and `InputEnabled` too.
+  with `source INPUT` returns `NONE`. That matches the PII decision above.
 - Guardrail PII masking applies to the API response only. Model invocation logs,
   if enabled, hold unmasked text. Keep invocation logging off or encrypt the log
   group.
@@ -74,7 +74,7 @@ a spike show it works. `out` = not possible or out of scope.
 | --- | --- | --- | --- |
 | R1 | Split the export into one document per ticket with metadata | implemented | `etl/split_tickets.py`. 6,950 tickets, 13,900 documents, 11 MB. |
 | R2 | Ingest full-thread and customer-only variants side by side | validated | Metadata filter on `variant`. Confirm at retrieval. |
-| R3 | Redact PII before ingestion and at query time | validated | `ApplyGuardrail` and `guardrailConfiguration` on `RetrieveAndGenerate`. |
+| R3 | Redact PII in the drafted reply | implemented | `ApplyGuardrail` with `source OUTPUT` anonymised name, phone and email (T3, 2026-09-14). Query-time path is T4. |
 | R4 | Retrieve similar past tickets for a new ticket | validated | Managed Knowledge Base, hybrid search included. |
 | R5 | Draft a reply with citations to source ticket IDs | validated | `RetrieveAndGenerate` returns citations. Ticket ID comes from metadata. |
 | R6 | Classify the ticket: `howto`, `tenant-data`, `bug`, `unclear` | validated | Custom prompt on `RetrieveAndGenerate` or a second Converse call. |
@@ -183,12 +183,13 @@ citation has the same `variant`.
 ```
 
 **T3 PII redaction (R3).** Expect `action` = `GUARDRAIL_INTERVENED` and the
-name, phone and email replaced with `{NAME}`, `{PHONE}` and `{EMAIL}`.
+name, phone and email replaced with `{NAME}`, `{PHONE}` and `{EMAIL}`. The
+source must be `OUTPUT`; input is not redacted by design.
 
 ```shell
 aws bedrock-runtime apply-guardrail \
   --guardrail-identifier $GuardrailId --guardrail-version $GuardrailVersion \
-  --source INPUT \
+  --source OUTPUT \
   --content '[{"text":{"text":"Please call Jane Smith on 07700 900123 or email jane@example.com"}}]'
 ```
 

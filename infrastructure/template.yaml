@@ -93,40 +93,16 @@ Resources:
         PiiEntitiesConfig:
           - Type: NAME
             Action: ANONYMIZE
-            InputAction: ANONYMIZE
-            InputEnabled: true
-            OutputAction: ANONYMIZE
-            OutputEnabled: true
           - Type: EMAIL
             Action: ANONYMIZE
-            InputAction: ANONYMIZE
-            InputEnabled: true
-            OutputAction: ANONYMIZE
-            OutputEnabled: true
           - Type: PHONE
             Action: ANONYMIZE
-            InputAction: ANONYMIZE
-            InputEnabled: true
-            OutputAction: ANONYMIZE
-            OutputEnabled: true
           - Type: ADDRESS
             Action: ANONYMIZE
-            InputAction: ANONYMIZE
-            InputEnabled: true
-            OutputAction: ANONYMIZE
-            OutputEnabled: true
           - Type: UK_NATIONAL_INSURANCE_NUMBER
             Action: ANONYMIZE
-            InputAction: ANONYMIZE
-            InputEnabled: true
-            OutputAction: ANONYMIZE
-            OutputEnabled: true
           - Type: PASSWORD
             Action: ANONYMIZE
-            InputAction: ANONYMIZE
-            InputEnabled: true
-            OutputAction: ANONYMIZE
-            OutputEnabled: true
 
   PiiGuardrailVersion:
     Type: AWS::Bedrock::GuardrailVersion
