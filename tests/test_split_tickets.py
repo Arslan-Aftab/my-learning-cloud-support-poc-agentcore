@@ -15,7 +15,8 @@ def test_split_sample_ticket():
     )
     full = (out / "full/HQGNC.md").read_text()
     customer = (out / "customer/HQGNC.md").read_text()
-    meta = json.loads((out / "full/HQGNC.md.metadata.json").read_text())["metadataAttributes"]
+    raw = json.loads((out / "full/HQGNC.md.metadata.json").read_text())["metadataAttributes"]
+    meta = {k: next(iter(v["value"].values().__reversed__())) for k, v in raw.items()}
 
     assert full.startswith("# unable to add training course\n")
     assert "**MLC**" in full and "**MLC**" not in customer
@@ -24,6 +25,7 @@ def test_split_sample_ticket():
     assert full.index("not showing error") < full.index("**MLC**") < full.index("give this a go")
     assert meta["reopened"] is True and meta["hasMlcReply"] is True
     assert meta["variant"] == "full" and meta["tenant"] == "bb-luton"
+    assert raw["created"]["value"]["type"] == "NUMBER" and raw["reopened"]["value"]["type"] == "BOOLEAN"
 
 
 if __name__ == "__main__":

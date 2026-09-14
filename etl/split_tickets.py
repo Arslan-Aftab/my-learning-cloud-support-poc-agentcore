@@ -40,21 +40,29 @@ def render(ticket, msgs):
     return "\n".join(lines)
 
 
+def typed(value):
+    """Managed Knowledge Base metadata values carry an explicit type."""
+    if isinstance(value, bool):
+        return {"value": {"type": "BOOLEAN", "booleanValue": value}}
+    if isinstance(value, int):
+        return {"value": {"type": "NUMBER", "numberValue": value}}
+    return {"value": {"type": "STRING", "stringValue": value}}
+
+
 def metadata(ticket, variant, msgs):
     notes = [m.get("message", "") for m in ticket.get("adminThread") or [] if m.get("note")]
-    return {
-        "metadataAttributes": {
-            "ticketId": ticket["ticketId"],
-            "tenant": ticket["tenant"],
-            "variant": variant,
-            "priority": ticket.get("priority", ""),
-            "supportCategory": ticket.get("supportCategory", ""),
-            "created": (ticket.get("created") or {}).get("timestamp") or msgs[0][0],
-            "closed": (ticket.get("closed") or {}).get("timestamp", 0),
-            "reopened": sum("Ticket closed" in n for n in notes) > 1,
-            "hasMlcReply": any(a == "MLC" for _, a, _ in msgs),
-        }
+    attributes = {
+        "ticketId": ticket["ticketId"],
+        "tenant": ticket["tenant"],
+        "variant": variant,
+        "priority": ticket.get("priority", ""),
+        "supportCategory": ticket.get("supportCategory", ""),
+        "created": (ticket.get("created") or {}).get("timestamp") or msgs[0][0],
+        "closed": (ticket.get("closed") or {}).get("timestamp", 0),
+        "reopened": sum("Ticket closed" in n for n in notes) > 1,
+        "hasMlcReply": any(a == "MLC" for _, a, _ in msgs),
     }
+    return {"metadataAttributes": {k: typed(v) for k, v in attributes.items()}}
 
 
 def split(tickets, out_dir):
