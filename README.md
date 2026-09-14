@@ -88,7 +88,7 @@ a spike show it works. `out` = not possible or out of scope.
 | --- | --- |
 | `etl/split_tickets.py` | Splits the export into per-ticket documents and metadata sidecars |
 | `tests/` | Self-check for the ETL, with one fixture ticket |
-| `infrastructure/template.yaml` | CloudFormation: bucket, Knowledge Base role, Knowledge Base, data source, Guardrail. Not written yet. |
+| `infrastructure/template.yaml` | CloudFormation: bucket, Knowledge Base role, Knowledge Base, data source, Guardrail. |
 | `demo/` | One script per experiment. Not written yet. |
 | `data/` | Local ticket export. Git ignores it. |
 | `out/` | ETL output. Git ignores it. |
@@ -103,12 +103,30 @@ a spike show it works. `out` = not possible or out of scope.
    python3 etl/split_tickets.py data/super-admin.tickets.json out/
    ```
 
-3. Upload: `aws s3 sync out/ s3://<bucket>/tickets/` then start a sync job on
-   the Knowledge Base data source.
+3. Upload the documents and start an ingestion job:
 
-Steps 3 onwards need the PoC account, which is not provisioned yet.
+   ```shell
+   aws s3 sync out/ s3://<BucketName>/tickets/ --profile mlc-support-poc
+   aws bedrock-agent start-ingestion-job --knowledge-base-id <KnowledgeBaseId> \
+     --data-source-id <DataSourceId> --profile mlc-support-poc
+   ```
+
+   `<BucketName>`, `<KnowledgeBaseId>` and `<DataSourceId>` are stack outputs.
 
 ## Deploying
 
-Not yet. The plan is `aws cloudformation deploy` of `infrastructure/template.yaml`
-into the PoC account in `eu-west-2`, run by hand.
+The PoC account is `938733851942` in the Lambert Labs organisation. The
+profile `mlc-support-poc` uses the `ll-aws-main` SSO session with
+`AdministratorAccess` in `eu-west-2`. A `-ro` profile does not exist yet.
+
+`infrastructure/template.yaml` creates the ticket bucket, the Knowledge Base
+role, the managed Knowledge Base, the S3 data source and the PII Guardrail.
+
+```shell
+cfn-lint --regions eu-west-2 -t infrastructure/template.yaml
+aws cloudformation deploy --stack-name mlc-support-poc \
+  --template-file infrastructure/template.yaml \
+  --capabilities CAPABILITY_NAMED_IAM --profile mlc-support-poc
+aws cloudformation describe-stacks --stack-name mlc-support-poc \
+  --query 'Stacks[0].Outputs' --profile mlc-support-poc
+```
