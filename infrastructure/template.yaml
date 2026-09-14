@@ -82,6 +82,32 @@ Resources:
               inclusionPrefixes:
                 - tickets/
 
+  IngestionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/vendedlogs/bedrock/${Prefix}-kb-ingestion"
+      RetentionInDays: 30
+
+  IngestionLogSource:
+    Type: AWS::Logs::DeliverySource
+    Properties:
+      Name: !Sub "${Prefix}-kb-ingestion"
+      LogType: APPLICATION_LOGS
+      ResourceArn: !GetAtt KnowledgeBase.KnowledgeBaseArn
+
+  IngestionLogDestination:
+    Type: AWS::Logs::DeliveryDestination
+    Properties:
+      Name: !Sub "${Prefix}-kb-ingestion"
+      DestinationResourceArn: !GetAtt IngestionLogGroup.Arn
+      OutputFormat: json
+
+  IngestionLogDelivery:
+    Type: AWS::Logs::Delivery
+    Properties:
+      DeliverySourceName: !Ref IngestionLogSource
+      DeliveryDestinationArn: !GetAtt IngestionLogDestination.Arn
+
   PiiGuardrail:
     Type: AWS::Bedrock::Guardrail
     Properties:
@@ -117,6 +143,8 @@ Outputs:
     Value: !Ref KnowledgeBase
   DataSourceId:
     Value: !GetAtt TicketDataSource.DataSourceId
+  IngestionLogGroup:
+    Value: !Ref IngestionLogGroup
   GuardrailId:
     Value: !GetAtt PiiGuardrail.GuardrailId
   GuardrailVersion:
