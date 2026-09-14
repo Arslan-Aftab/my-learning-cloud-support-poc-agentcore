@@ -46,6 +46,9 @@ you want AgentCore Evaluations.
   count after ingestion.
 - Managed Knowledge Base metadata filters support `equals`, `in`, `notIn` and
   range operators. `startsWith` and `stringContains` are not supported.
+- A managed Knowledge Base rejects the plain `S3` data source type. Use
+  `MANAGED_KNOWLEDGE_BASE_CONNECTOR` with `connectorParameters.type: S3`.
+  Data source creation is asynchronous; wait for `AVAILABLE` before ingesting.
 - The S3 connector treats one file as one document. The 27 MB export must be
   split into one file per ticket with a `<file>.metadata.json` sidecar.
 - Guardrail PII masking applies to the API response only. Model invocation logs,

@@ -70,11 +70,17 @@ Resources:
       Name: tickets
       DataDeletionPolicy: DELETE
       DataSourceConfiguration:
-        Type: S3
-        S3Configuration:
-          BucketArn: !GetAtt TicketBucket.Arn
-          InclusionPrefixes:
-            - tickets/
+        Type: MANAGED_KNOWLEDGE_BASE_CONNECTOR
+        ManagedKnowledgeBaseConnectorConfiguration:
+          ConnectorParameters:
+            type: S3
+            version: "1"
+            connectionConfiguration:
+              bucketName: !Ref TicketBucket
+              bucketOwnerAccountId: !Ref AWS::AccountId
+            filterConfiguration:
+              inclusionPrefixes:
+                - tickets/
 
   PiiGuardrail:
     Type: AWS::Bedrock::Guardrail
