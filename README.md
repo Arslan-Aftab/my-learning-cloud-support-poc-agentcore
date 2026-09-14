@@ -33,6 +33,7 @@ new ticket ──► demo/draft_reply.py ──► Retrieve ──► Converse +
 | Infrastructure | One CloudFormation template, `infrastructure/template.yaml` | Five resources. `AWS::Bedrock::KnowledgeBase` supports `ManagedKnowledgeBaseConfiguration`. |
 | Output | Text in the console. No write-back to Lumis. | Kick-off decision. |
 | Corpus scope | Escalated tickets only, including tickets assigned to developers | Kick-off decision. |
+| Document format | One Markdown file per ticket. Structured fields go in the `.metadata.json` sidecar. | The S3 connector accepts `.txt`, `.md`, `.html`, `.docx`, `.csv`, `.xlsx` and `.pdf`. It does not accept `.json` as a document. Markdown gives the embedding model prose without keys and braces. |
 | Bad tickets | Keep all. Store `reopened` as metadata. Test with and without a filter. | Scott's "closed twice" heuristic is a signal, not a verdict. |
 
 Add AgentCore only when Lumis calls the tool over HTTP, when the agent needs the
