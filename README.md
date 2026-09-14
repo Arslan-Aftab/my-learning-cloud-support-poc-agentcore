@@ -188,5 +188,6 @@ aws bedrock-runtime apply-guardrail \
 
 **T4 PII redaction at query time (R3).** Repeat T1 with
 `"guardrailConfiguration":{"guardrailId":"<GuardrailId>","guardrailVersion":"<GuardrailVersion>"}`
-inside `knowledgeBaseConfiguration` and a question that names a person.
+inside `knowledgeBaseConfiguration.generationConfiguration` and a question that
+names a person.
 Expect no personal name in the reply.
