@@ -19,6 +19,11 @@ needs it.
 Never commit anything under `data/` or `out/`. The export holds customer PII.
 
 Use only an Identity Center profile with the `-ro` suffix for reads. Ask before
-any command that changes AWS state. The PoC account is not provisioned yet.
+any command that changes AWS state.
 
 Update the requirements table in `README.md` when a requirement changes status.
+
+Track the session goals in Claude todos. Create them at the start of the
+session. Add a todo for each new piece of work before you start it. Check the
+list before you switch task. Implementation detail drifts the chat away from
+the goal, and the list is how we return to it.

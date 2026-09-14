@@ -16,6 +16,7 @@ ESCALATION_BOILERPLATE = (
     "This ticket was submitted by an administrator and was therefore "
     "automatically escalated to My Learning Cloud"
 )
+SYSTEM_MESSAGES = {"Ticket escalated to My Learning Cloud", "Ticket closed"}
 AUTHORS = {"thread": "Customer", "adminThread": "MLC", "parentThread": "Parent tenant"}
 
 
@@ -27,7 +28,7 @@ def messages(ticket):
             if m.get("note"):
                 continue
             text = m.get("message", "").replace(ESCALATION_BOILERPLATE, "").strip()
-            if text:
+            if text and text not in SYSTEM_MESSAGES:
                 out.append((m["timestamp"], author, text))
     return sorted(out, key=lambda m: m[0])
 
@@ -48,7 +49,7 @@ def metadata(ticket, variant, msgs):
             "variant": variant,
             "priority": ticket.get("priority", ""),
             "supportCategory": ticket.get("supportCategory", ""),
-            "created": ticket["created"]["timestamp"],
+            "created": (ticket.get("created") or {}).get("timestamp") or msgs[0][0],
             "closed": (ticket.get("closed") or {}).get("timestamp", 0),
             "reopened": sum("Ticket closed" in n for n in notes) > 1,
             "hasMlcReply": any(a == "MLC" for _, a, _ in msgs),
