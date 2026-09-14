@@ -23,9 +23,9 @@ def test_split_sample_ticket():
     assert "Assignment changed" not in full, "internal notes must be dropped"
     assert "automatically escalated" not in full, "boilerplate must be stripped"
     assert full.index("not showing error") < full.index("**MLC**") < full.index("give this a go")
-    assert meta["reopened"] is True and meta["hasMlcReply"] is True
+    assert meta["reopened"] == "true" and meta["hasMlcReply"] == "true"
     assert meta["variant"] == "full" and meta["tenant"] == "bb-luton"
-    assert raw["created"]["value"]["type"] == "NUMBER" and raw["reopened"]["value"]["type"] == "BOOLEAN"
+    assert raw["created"]["value"]["type"] == "NUMBER" and raw["reopened"]["value"]["type"] == "STRING"
 
 
 if __name__ == "__main__":

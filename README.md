@@ -49,7 +49,9 @@ you want AgentCore Evaluations.
   boto3 1.43 or later.
 - Managed Knowledge Base metadata sidecars use typed values:
   `{"key": {"value": {"type": "STRING", "stringValue": "x"}}}`. Types are
-  `STRING`, `NUMBER`, `BOOLEAN` and `STRING_LIST`. The flat format is ignored.
+  `STRING`, `NUMBER` and `STRING_LIST`. The S3 connector rejects `BOOLEAN`
+  with "Invalid custom metadata attribute", so booleans are `"true"`/`"false"`
+  strings. The flat format is ignored.
 - Managed Knowledge Base metadata filters support `equals`, `in`, `notIn` and
   range operators. `startsWith` and `stringContains` are not supported.
 - The ingestion job statistics do not explain a failed document. Per-document

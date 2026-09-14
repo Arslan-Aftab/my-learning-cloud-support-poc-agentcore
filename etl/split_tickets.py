@@ -43,7 +43,8 @@ def render(ticket, msgs):
 def typed(value):
     """Managed Knowledge Base metadata values carry an explicit type."""
     if isinstance(value, bool):
-        return {"value": {"type": "BOOLEAN", "booleanValue": value}}
+        # The managed S3 connector rejects BOOLEAN; store "true"/"false".
+        return {"value": {"type": "STRING", "stringValue": str(value).lower()}}
     if isinstance(value, int):
         return {"value": {"type": "NUMBER", "numberValue": value}}
     return {"value": {"type": "STRING", "stringValue": value}}
