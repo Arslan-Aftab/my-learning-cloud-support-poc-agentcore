@@ -83,6 +83,7 @@ you want AgentCore Evaluations.
 | `demo/` | One script per experiment. Not written yet. |
 | `data/` | Local ticket export. Git ignores it. |
 | `out/` | ETL output. Git ignores it. |
+| `HANDOFF.md` | Open work and next steps. This file holds the status quo. |
 
 Every script carries a [PEP 723](https://peps.python.org/pep-0723/) header that
 names its own dependencies. `uv run <script>` is enough on a clean machine.
