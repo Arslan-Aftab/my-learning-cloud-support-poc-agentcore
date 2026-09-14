@@ -213,10 +213,23 @@ ingestion result and one retrieval, then drop `--limit` and load everything.
 
 ## Testing
 
-Each test maps to a requirement. Record the result in the requirements table.
+Each test has one meaning. The table maps tests to requirements. Tick a
+requirement when its tests pass and record the date in the requirements table.
 
-**T1 Retrieve (R4).** Ask a how-to question. Expect chunks whose
-`metadata.ticketId` values are real ticket IDs.
+| Test | Meaning | Requirements | Status |
+|---|---|---|---|
+| T1 | Retrieve past tickets for a question | R4 | passed 2026-09-14 |
+| T2 | Retrieve with a metadata filter | R2 | passed 2026-09-14 |
+| T3 | Ask a question, get a drafted reply with citations | R5, R8 | script not written |
+| T4 | Ask a question whose sources hold PII, get a redacted draft | R3 | guardrail unit check passed 2026-09-14 |
+| T5 | Classify and signpost | R6, R7 | script not written |
+| T6 | Compare a draft with the real MLC reply on a held-out ticket | R10 | not designed |
+| T7 | Confirm region and idle cost | R9, R11 | not run |
+
+### T1 Retrieve
+
+Ask a how-to question. Expect chunks whose `metadata.ticketId` values are real
+ticket IDs and a sensible top result.
 
 ```shell
 aws bedrock-agent-runtime retrieve --knowledge-base-id $KnowledgeBaseId \
@@ -225,16 +238,34 @@ aws bedrock-agent-runtime retrieve --knowledge-base-id $KnowledgeBaseId \
   --query 'retrievalResults[].[score,metadata.ticketId,metadata.variant]'
 ```
 
-**T2 Variant filter (R2).** Repeat T1 with a filter and confirm every result
-has the same `variant`.
+### T2 Retrieve with a filter
+
+Repeat T1 with a filter. Expect every result to have `variant` = `customer`.
 
 ```shell
   --retrieval-configuration '{"managedSearchConfiguration":{"numberOfResults":3,"filter":{"equals":{"key":"variant","value":"customer"}}}}'
 ```
 
-**T3 PII redaction (R3).** Expect `action` = `GUARDRAIL_INTERVENED` and the
-name, phone and email replaced with `{NAME}`, `{PHONE}` and `{EMAIL}`. The
-source must be `OUTPUT`; input is not redacted by design.
+### T3 Ask a question
+
+`demo/draft_reply.py` runs T1, builds a prompt from the chunks and calls
+`Converse` with the Guardrail attached. Type any support question. Expect a
+draft that cites the ticket IDs it used and nothing sent anywhere.
+
+```shell
+python3 demo/draft_reply.py "How do I view completion of a policy that is not mandatory?"
+```
+
+### T4 Ask a question that surfaces PII
+
+Run T3 twice. First with a question whose matching tickets name a person or
+give a phone number. Expect `{NAME}`, `{PHONE}` or `{EMAIL}` in the draft.
+Then with a question whose tickets hold no PII. Expect an unchanged draft.
+Pick both questions from the sample once the corpus is loaded.
+
+The unit check below proves the Guardrail alone. Expect `action` =
+`GUARDRAIL_INTERVENED`. The source must be `OUTPUT`; input is not redacted by
+design.
 
 ```shell
 aws bedrock-runtime apply-guardrail \
@@ -243,7 +274,19 @@ aws bedrock-runtime apply-guardrail \
   --content '[{"text":{"text":"Please call Jane Smith on 07700 900123 or email jane@example.com"}}]'
 ```
 
-**T4 Draft with citations and redaction (R3, R5).** `demo/draft_reply.py`,
-not written yet. It runs T1, builds a prompt from the chunks, and calls
-`Converse` with `guardrailConfig` set to the Guardrail. Expect a draft that
-cites ticket IDs and holds no personal name.
+### T5 Classify and signpost
+
+Run T3 with one question per class: `howto`, `tenant-data`, `bug`, `unclear`.
+Expect the right label on each. For `tenant-data`, expect the draft to name
+the screen and the data to request from the customer.
+
+### T6 Compare with the real reply
+
+Hold out a closed ticket with an MLC reply. Run T3 on its customer-only text.
+Compare the draft with the real reply by hand. Design the judge later.
+
+### T7 Region and cost
+
+Confirm the Knowledge Base ARN and the model ARN in `.env` are `eu-west-2`
+and `eu.`. Read the bill after a quiet week and expect storage and retrieval
+charges only.
