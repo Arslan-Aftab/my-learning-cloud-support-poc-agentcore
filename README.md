@@ -18,7 +18,7 @@ super-admin.tickets.json ──► etl/split_tickets.py ──► out/{full,cust
                                                               ▼
                                                      S3 bucket ──► Managed Knowledge Base
                                                                     (S3 connector)
-new ticket ──► demo/draft_reply.py ──► RetrieveAndGenerate + Guardrail ──► console
+new ticket ──► demo/draft_reply.py ──► Retrieve ──► Converse + Guardrail ──► console
 ```
 
 | Area | Decision | Why |
@@ -26,7 +26,7 @@ new ticket ──► demo/draft_reply.py ──► RetrieveAndGenerate + Guardra
 | Region | `eu-west-2` London | UK or Ireland data residency. Every service below is available there (verified 2026-09-11). |
 | Retrieval | Bedrock **Managed** Knowledge Base, S3 connector | $5 per GB stored per month, $1 per 1,000 retrievals. Embedding model, reranker and hybrid search are included. Nothing to provision. The corpus is well under 1 GB. |
 | Chunking experiment | Ingest each ticket twice: full thread and customer side only. Tag each file with `variant` metadata. Filter on `variant` at retrieval. | Compares both strategies against one index. Fall back to two Knowledge Bases if the filter is awkward. |
-| Query API | `RetrieveAndGenerate` with a Guardrail attached | Least code. Returns the draft and citations in one call. |
+| Query API | `Retrieve` with `managedSearchConfiguration`, then one `Converse` call with the Guardrail attached | `RetrieveAndGenerate` is not supported for managed Knowledge Bases (verified 2026-09-14). Two calls, and the prompt is ours to control. |
 | Generation model | Claude Sonnet, `eu.` inference profile | Draft quality. The `eu.` profile keeps inference inside the EU. Try Haiku if cost matters. |
 | PII | Bedrock Guardrail, PII set to `ANONYMIZE` on model output only. The index holds the tickets as written. | The Knowledge Base stays faithful to the source. The draft reply is what leaves the tool, so redaction sits there. Input redaction was tried and dropped on 2026-09-14. |
 | Runtime | Plain Bedrock API calls from Python. No AgentCore, no Strands, no Bedrock Agents. | The tool is a fixed pipeline with no tool loop, no session and no external caller. |
@@ -44,8 +44,16 @@ you want AgentCore Evaluations.
 - The managed Knowledge Base offers built-in or fixed-size chunking only. One
   vector per ticket is not guaranteed. Use a large fixed size and check the chunk
   count after ingestion.
+- `RetrieveAndGenerate` fails with "not supported for managed knowledge bases".
+  `Retrieve` needs `managedSearchConfiguration`, which needs AWS CLI 2.36 or
+  boto3 1.43 or later.
+- Managed Knowledge Base metadata sidecars use typed values:
+  `{"key": {"value": {"type": "STRING", "stringValue": "x"}}}`. Types are
+  `STRING`, `NUMBER`, `BOOLEAN` and `STRING_LIST`. The flat format is ignored.
 - Managed Knowledge Base metadata filters support `equals`, `in`, `notIn` and
   range operators. `startsWith` and `stringContains` are not supported.
+- The ingestion job statistics do not explain a failed document. Per-document
+  reasons are in the ingestion log group that the stack creates.
 - A managed Knowledge Base rejects the plain `S3` data source type. Use
   `MANAGED_KNOWLEDGE_BASE_CONNECTOR` with `connectorParameters.type: S3`.
   Data source creation is asynchronous; wait for `AVAILABLE` before ingesting.
@@ -76,8 +84,8 @@ a spike show it works. `out` = not possible or out of scope.
 | R2 | Ingest full-thread and customer-only variants side by side | validated | Metadata filter on `variant`. Confirm at retrieval. |
 | R3 | Redact PII in the drafted reply | implemented | `ApplyGuardrail` with `source OUTPUT` anonymised name, phone and email (T3, 2026-09-14). Query-time path is T4. |
 | R4 | Retrieve similar past tickets for a new ticket | validated | Managed Knowledge Base, hybrid search included. |
-| R5 | Draft a reply with citations to source ticket IDs | validated | `RetrieveAndGenerate` returns citations. Ticket ID comes from metadata. |
-| R6 | Classify the ticket: `howto`, `tenant-data`, `bug`, `unclear` | validated | Custom prompt on `RetrieveAndGenerate` or a second Converse call. |
+| R5 | Draft a reply with citations to source ticket IDs | validated | `Retrieve` returns chunks with `metadata.ticketId`. The Converse prompt asks the model to cite them. |
+| R6 | Classify the ticket: `howto`, `tenant-data`, `bug`, `unclear` | validated | Same Converse call as R5, or a second cheaper one. |
 | R7 | Signpost for `tenant-data` tickets: name the screen and the data to request | validated | Prompt only. |
 | R8 | Human review of every draft | validated | Output is console text. Nothing is sent. |
 | R9 | Data stays in UK or EU | validated | `eu-west-2` plus `eu.` inference profile. |
@@ -106,7 +114,7 @@ Once per machine.
 
 - Python 3.12 or later. The ETL uses the standard library only.
 - [uv](https://docs.astral.sh/uv/) for tools: `uv tool install cfn-lint`.
-- AWS CLI v2.
+- AWS CLI 2.36 or later. Older builds reject `managedSearchConfiguration`.
 - Access to the PoC account `938733851942` in the Lambert Labs organisation
   through the `ll-aws-main` SSO session. Add the profile to `~/.aws/config`.
   No `-ro` profile exists yet.
@@ -147,10 +155,11 @@ Load the variables in each new shell: `set -a; source .env; set +a`.
 
 ## Loading tickets
 
-Repeat when the export changes.
+Repeat when the export changes. Load a small sample first with `--limit 20`,
+check the ingestion result and one retrieval, then load everything.
 
 ```shell
-python3 etl/split_tickets.py data/super-admin.tickets.json out/
+python3 etl/split_tickets.py data/super-admin.tickets.json out/ --limit 20
 aws s3 sync out/ s3://$BucketName/tickets/ --delete
 aws bedrock-agent start-ingestion-job \
   --knowledge-base-id $KnowledgeBaseId --data-source-id $DataSourceId
@@ -159,27 +168,35 @@ aws bedrock-agent list-ingestion-jobs \
   --query 'ingestionJobSummaries[0].[status,statistics]'
 ```
 
-Wait until the status is `COMPLETE`. `--delete` removes files that are no
-longer in `out/`, which avoids the re-ingest failure noted in Findings.
+Wait until the status is `COMPLETE` and `numberOfNewDocumentsIndexed` is not
+zero. `--delete` removes files that are no longer in `out/`, which avoids the
+re-ingest failure noted in Findings. If documents fail, read the reasons:
+
+```shell
+aws logs filter-log-events --log-group-name $IngestionLogGroup \
+  --filter-pattern '{ $.event.error_message = * }' \
+  --query 'events[].message' --output text | head
+```
 
 ## Testing
 
 Each test maps to a requirement. Record the result in the requirements table.
 
-**T1 Retrieve and generate (R4, R5).** Ask a how-to question. Expect a reply
-plus citations whose `metadata.ticketId` values are real ticket IDs.
+**T1 Retrieve (R4).** Ask a how-to question. Expect chunks whose
+`metadata.ticketId` values are real ticket IDs.
 
 ```shell
-aws bedrock-agent-runtime retrieve-and-generate \
-  --input '{"text":"How do I view completion of a policy that is not mandatory?"}' \
-  --retrieve-and-generate-configuration "{\"type\":\"KNOWLEDGE_BASE\",\"knowledgeBaseConfiguration\":{\"knowledgeBaseId\":\"$KnowledgeBaseId\",\"modelArn\":\"$ModelArn\"}}"
+aws bedrock-agent-runtime retrieve --knowledge-base-id $KnowledgeBaseId \
+  --retrieval-query '{"text":"How do I view completion of a policy that is not mandatory?"}' \
+  --retrieval-configuration '{"managedSearchConfiguration":{"numberOfResults":3}}' \
+  --query 'retrievalResults[].[score,metadata.ticketId,metadata.variant]'
 ```
 
-**T2 Variant filter (R2).** Repeat T1 with a filter and confirm every
-citation has the same `variant`.
+**T2 Variant filter (R2).** Repeat T1 with a filter and confirm every result
+has the same `variant`.
 
 ```shell
-  --retrieve-and-generate-configuration "{\"type\":\"KNOWLEDGE_BASE\",\"knowledgeBaseConfiguration\":{\"knowledgeBaseId\":\"$KnowledgeBaseId\",\"modelArn\":\"$ModelArn\",\"retrievalConfiguration\":{\"managedSearchConfiguration\":{\"filter\":{\"equals\":{\"key\":\"variant\",\"value\":\"customer\"}}}}}}"
+  --retrieval-configuration '{"managedSearchConfiguration":{"numberOfResults":3,"filter":{"equals":{"key":"variant","value":"customer"}}}}'
 ```
 
 **T3 PII redaction (R3).** Expect `action` = `GUARDRAIL_INTERVENED` and the
@@ -193,7 +210,7 @@ aws bedrock-runtime apply-guardrail \
   --content '[{"text":{"text":"Please call Jane Smith on 07700 900123 or email jane@example.com"}}]'
 ```
 
-**T4 PII redaction at query time (R3).** Repeat T1 with
-`"generationConfiguration":{"guardrailConfiguration":{"guardrailId":"$GuardrailId","guardrailVersion":"$GuardrailVersion"}}`
-inside `knowledgeBaseConfiguration` and a question that names a person.
-Expect no personal name in the reply.
+**T4 Draft with citations and redaction (R3, R5).** `demo/draft_reply.py`,
+not written yet. It runs T1, builds a prompt from the chunks, and calls
+`Converse` with `guardrailConfig` set to the Guardrail. Expect a draft that
+cites ticket IDs and holds no personal name.

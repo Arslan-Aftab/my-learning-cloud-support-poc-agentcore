@@ -1,6 +1,6 @@
 """Split the Lumis ticket export into one Knowledge Base document per ticket.
 
-Usage: python3 etl/split_tickets.py data/super-admin.tickets.json out/
+Usage: python3 etl/split_tickets.py data/super-admin.tickets.json out/ [--limit N]
 
 Writes out/<variant>/<ticketId>.md and a .metadata.json sidecar for each,
 where variant is "full" (whole conversation) or "customer" (subject and
@@ -81,5 +81,7 @@ def split(tickets, out_dir):
 if __name__ == "__main__":
     src, out = sys.argv[1], sys.argv[2]
     tickets = json.loads(Path(src).read_text())
+    if "--limit" in sys.argv:
+        tickets = tickets[: int(sys.argv[sys.argv.index("--limit") + 1])]
     split(tickets, out)
     print(f"{len(tickets)} tickets -> {out}")
