@@ -125,7 +125,8 @@ current `aws sso login`.
 
 The template creates the ticket bucket, the Knowledge Base role, the managed
 Knowledge Base, the S3 data source and the PII Guardrail. Nothing else is
-needed.
+needed. The last two commands write the stack outputs and the model ARN to
+`.env`, which git ignores. Every later command reads them from there.
 
 ```shell
 cfn-lint --regions eu-west-2 -t infrastructure/template.yaml
@@ -133,11 +134,12 @@ aws cloudformation deploy --stack-name mlc-support-poc \
   --template-file infrastructure/template.yaml \
   --capabilities CAPABILITY_NAMED_IAM
 aws cloudformation describe-stacks --stack-name mlc-support-poc \
-  --query 'Stacks[0].Outputs' --output table
+  --query 'Stacks[0].Outputs[].join(`=`,[OutputKey,OutputValue])' \
+  --output text | tr '\t' '\n' > .env
+echo "ModelArn=arn:aws:bedrock:eu-west-2:938733851942:inference-profile/eu.anthropic.claude-sonnet-5" >> .env
 ```
 
-The outputs `BucketName`, `KnowledgeBaseId`, `DataSourceId`, `GuardrailId`
-and `GuardrailVersion` are used below.
+Load the variables in each new shell: `set -a; source .env; set +a`.
 
 ## Loading tickets
 
@@ -145,11 +147,11 @@ Repeat when the export changes.
 
 ```shell
 python3 etl/split_tickets.py data/super-admin.tickets.json out/
-aws s3 sync out/ s3://<BucketName>/tickets/ --delete
+aws s3 sync out/ s3://$BucketName/tickets/ --delete
 aws bedrock-agent start-ingestion-job \
-  --knowledge-base-id <KnowledgeBaseId> --data-source-id <DataSourceId>
+  --knowledge-base-id $KnowledgeBaseId --data-source-id $DataSourceId
 aws bedrock-agent list-ingestion-jobs \
-  --knowledge-base-id <KnowledgeBaseId> --data-source-id <DataSourceId> \
+  --knowledge-base-id $KnowledgeBaseId --data-source-id $DataSourceId \
   --query 'ingestionJobSummaries[0].[status,statistics]'
 ```
 
@@ -160,23 +162,20 @@ longer in `out/`, which avoids the re-ingest failure noted in Findings.
 
 Each test maps to a requirement. Record the result in the requirements table.
 
-**T1 Retrieve and generate (R4, R5).** Find the `eu.` Sonnet inference
-profile, then ask a how-to question. Expect a reply plus citations whose
-`metadata.ticketId` values are real ticket IDs.
+**T1 Retrieve and generate (R4, R5).** Ask a how-to question. Expect a reply
+plus citations whose `metadata.ticketId` values are real ticket IDs.
 
 ```shell
-aws bedrock list-inference-profiles \
-  --query "inferenceProfileSummaries[?starts_with(inferenceProfileId,'eu.anthropic.claude-sonnet')].inferenceProfileArn"
 aws bedrock-agent-runtime retrieve-and-generate \
   --input '{"text":"How do I view completion of a policy that is not mandatory?"}' \
-  --retrieve-and-generate-configuration '{"type":"KNOWLEDGE_BASE","knowledgeBaseConfiguration":{"knowledgeBaseId":"<KnowledgeBaseId>","modelArn":"<ModelArn>"}}'
+  --retrieve-and-generate-configuration "{\"type\":\"KNOWLEDGE_BASE\",\"knowledgeBaseConfiguration\":{\"knowledgeBaseId\":\"$KnowledgeBaseId\",\"modelArn\":\"$ModelArn\"}}"
 ```
 
 **T2 Variant filter (R2).** Repeat T1 with a filter and confirm every
 citation has the same `variant`.
 
 ```shell
---retrieve-and-generate-configuration '{"type":"KNOWLEDGE_BASE","knowledgeBaseConfiguration":{"knowledgeBaseId":"<KnowledgeBaseId>","modelArn":"<ModelArn>","retrievalConfiguration":{"vectorSearchConfiguration":{"filter":{"equals":{"key":"variant","value":"customer"}}}}}}'
+  --retrieve-and-generate-configuration "{\"type\":\"KNOWLEDGE_BASE\",\"knowledgeBaseConfiguration\":{\"knowledgeBaseId\":\"$KnowledgeBaseId\",\"modelArn\":\"$ModelArn\",\"retrievalConfiguration\":{\"vectorSearchConfiguration\":{\"filter\":{\"equals\":{\"key\":\"variant\",\"value\":\"customer\"}}}}}}"
 ```
 
 **T3 PII redaction (R3).** Expect `action` = `GUARDRAIL_INTERVENED` and the
@@ -184,13 +183,12 @@ name, phone and email replaced with `{NAME}`, `{PHONE}` and `{EMAIL}`.
 
 ```shell
 aws bedrock-runtime apply-guardrail \
-  --guardrail-identifier <GuardrailId> --guardrail-version <GuardrailVersion> \
+  --guardrail-identifier $GuardrailId --guardrail-version $GuardrailVersion \
   --source INPUT \
   --content '[{"text":{"text":"Please call Jane Smith on 07700 900123 or email jane@example.com"}}]'
 ```
 
 **T4 PII redaction at query time (R3).** Repeat T1 with
-`"guardrailConfiguration":{"guardrailId":"<GuardrailId>","guardrailVersion":"<GuardrailVersion>"}`
-inside `knowledgeBaseConfiguration.generationConfiguration` and a question that
-names a person.
+`"generationConfiguration":{"guardrailConfiguration":{"guardrailId":"$GuardrailId","guardrailVersion":"$GuardrailVersion"}}`
+inside `knowledgeBaseConfiguration` and a question that names a person.
 Expect no personal name in the reply.
