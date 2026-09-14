@@ -85,7 +85,7 @@ a spike show it works. `out` = not possible or out of scope.
 | --- | --- | --- | --- |
 | R1 | Split the export into one document per ticket with metadata | implemented | `etl/split_tickets.py`. 6,950 tickets, 13,900 documents, 11 MB. |
 | R2 | Ingest full-thread and customer-only variants side by side | implemented | `equals` filter on `variant` returned customer chunks only (T2, 2026-09-14). |
-| R3 | Redact PII in the drafted reply | implemented | `ApplyGuardrail` with `source OUTPUT` anonymised name, phone and email (T3, 2026-09-14). Query-time path is T4. |
+| R3 | Redact PII in the drafted reply | partial | The Guardrail unit check anonymised name, phone and email (T4, 2026-09-14). The query-time path needs `demo/draft_reply.py`. |
 | R4 | Retrieve similar past tickets for a new ticket | implemented | `Retrieve` on the 20 ticket sample ranked the matching ticket first at score 0.75 (T1, 2026-09-14). |
 | R5 | Draft a reply with citations to source ticket IDs | validated | `Retrieve` returns chunks with `metadata.ticketId`. The Converse prompt asks the model to cite them. |
 | R6 | Classify the ticket: `howto`, `tenant-data`, `bug`, `unclear` | validated | Same Converse call as R5, or a second cheaper one. |
