@@ -65,7 +65,7 @@ a spike show it works. `out` = not possible or out of scope.
 
 | # | Requirement | Status | Note |
 | --- | --- | --- | --- |
-| R1 | Split the export into one document per ticket with metadata | implemented | `etl/split_tickets.py`, tested on one sample ticket. Not yet run on the full export. |
+| R1 | Split the export into one document per ticket with metadata | implemented | `etl/split_tickets.py`. 6,950 tickets, 13,900 documents, 11 MB. |
 | R2 | Ingest full-thread and customer-only variants side by side | validated | Metadata filter on `variant`. Confirm at retrieval. |
 | R3 | Redact PII before ingestion and at query time | validated | `ApplyGuardrail` and `guardrailConfiguration` on `RetrieveAndGenerate`. |
 | R4 | Retrieve similar past tickets for a new ticket | validated | Managed Knowledge Base, hybrid search included. |
@@ -93,40 +93,58 @@ a spike show it works. `out` = not possible or out of scope.
 | `data/` | Local ticket export. Git ignores it. |
 | `out/` | ETL output. Git ignores it. |
 
-## Getting started
+## Setup
+
+Once per machine. The PoC account is `938733851942` in the Lambert Labs
+organisation. No `-ro` profile exists yet.
+
+1. Add the profile to `~/.aws/config`. The `ll-aws-main` SSO session already
+   exists on Lambert Labs machines.
+
+   ```ini
+   [profile mlc-support-poc]
+   sso_session = ll-aws-main
+   sso_account_id = 938733851942
+   sso_role_name = AdministratorAccess
+   region = eu-west-2
+   ```
+
+2. Install the linter: `uv tool install cfn-lint`.
+3. Log in and deploy. The template creates the ticket bucket, the Knowledge
+   Base role, the managed Knowledge Base, the S3 data source and the PII
+   Guardrail. Nothing else is needed.
+
+   ```shell
+   export AWS_PROFILE=mlc-support-poc
+   aws sso login
+   cfn-lint --regions eu-west-2 -t infrastructure/template.yaml
+   aws cloudformation deploy --stack-name mlc-support-poc \
+     --template-file infrastructure/template.yaml \
+     --capabilities CAPABILITY_NAMED_IAM
+   aws cloudformation describe-stacks --stack-name mlc-support-poc \
+     --query 'Stacks[0].Outputs' --output table
+   ```
+
+   The outputs `BucketName`, `KnowledgeBaseId`, `DataSourceId` and
+   `GuardrailId` are used below.
+
+## Loading tickets
+
+Repeat when the export changes.
 
 1. Download `super-admin.tickets.json` from the project Drive folder to
    `data/`. The password is in the Teams chat. Never commit it.
-2. Run the ETL:
+2. Split it: `python3 etl/split_tickets.py data/super-admin.tickets.json out/`
+3. Upload and ingest:
 
    ```shell
-   python3 etl/split_tickets.py data/super-admin.tickets.json out/
+   aws s3 sync out/ s3://<BucketName>/tickets/ --delete
+   aws bedrock-agent start-ingestion-job \
+     --knowledge-base-id <KnowledgeBaseId> --data-source-id <DataSourceId>
+   aws bedrock-agent list-ingestion-jobs \
+     --knowledge-base-id <KnowledgeBaseId> --data-source-id <DataSourceId> \
+     --query 'ingestionJobSummaries[0].[status,statistics]'
    ```
 
-3. Upload the documents and start an ingestion job:
-
-   ```shell
-   aws s3 sync out/ s3://<BucketName>/tickets/ --profile mlc-support-poc
-   aws bedrock-agent start-ingestion-job --knowledge-base-id <KnowledgeBaseId> \
-     --data-source-id <DataSourceId> --profile mlc-support-poc
-   ```
-
-   `<BucketName>`, `<KnowledgeBaseId>` and `<DataSourceId>` are stack outputs.
-
-## Deploying
-
-The PoC account is `938733851942` in the Lambert Labs organisation. The
-profile `mlc-support-poc` uses the `ll-aws-main` SSO session with
-`AdministratorAccess` in `eu-west-2`. A `-ro` profile does not exist yet.
-
-`infrastructure/template.yaml` creates the ticket bucket, the Knowledge Base
-role, the managed Knowledge Base, the S3 data source and the PII Guardrail.
-
-```shell
-cfn-lint --regions eu-west-2 -t infrastructure/template.yaml
-aws cloudformation deploy --stack-name mlc-support-poc \
-  --template-file infrastructure/template.yaml \
-  --capabilities CAPABILITY_NAMED_IAM --profile mlc-support-poc
-aws cloudformation describe-stacks --stack-name mlc-support-poc \
-  --query 'Stacks[0].Outputs' --profile mlc-support-poc
-```
+   Wait until the status is `COMPLETE`. `--delete` removes files that are no
+   longer in `out/`, which avoids the re-ingest failure noted in Findings.
