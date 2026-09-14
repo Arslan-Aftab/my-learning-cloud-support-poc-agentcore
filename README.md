@@ -23,12 +23,12 @@ new ticket ──► demo/draft_reply.py ──► Retrieve ──► Converse +
 
 | Area | Decision | Why |
 | --- | --- | --- |
-| Region | `eu-west-2` London | UK or Ireland data residency. Every service below is available there (verified 2026-09-11). |
+| Region | `eu-west-2` London | UK or Ireland data residency. Every service below is available there. |
 | Retrieval | Bedrock **Managed** Knowledge Base, S3 connector | $5 per GB stored per month, $1 per 1,000 retrievals. Embedding model, reranker and hybrid search are included. Nothing to provision. The corpus is well under 1 GB. |
 | Chunking experiment | Ingest each ticket twice: full thread and customer side only. Tag each file with `variant` metadata. Filter on `variant` at retrieval. | Compares both strategies against one index. Fall back to two Knowledge Bases if the filter is awkward. |
-| Query API | `Retrieve` with `managedSearchConfiguration`, then one `Converse` call with the Guardrail attached | `RetrieveAndGenerate` is not supported for managed Knowledge Bases (verified 2026-09-14). Two calls, and the prompt is ours to control. |
+| Query API | `Retrieve` with `managedSearchConfiguration`, then one `Converse` call with the Guardrail attached | `RetrieveAndGenerate` is not supported for managed Knowledge Bases. Two calls, and the prompt is ours to control. |
 | Generation model | Claude Sonnet, `eu.` inference profile | Draft quality. The `eu.` profile keeps inference inside the EU. Try Haiku if cost matters. |
-| PII | Bedrock Guardrail, PII set to `ANONYMIZE` on model output only. The index holds the tickets as written. | The Knowledge Base stays faithful to the source. The draft reply is what leaves the tool, so redaction sits there. Input redaction was tried and dropped on 2026-09-14. |
+| PII | Bedrock Guardrail, PII set to `ANONYMIZE` on model output only. The index holds the tickets as written. | The Knowledge Base stays faithful to the source. The draft reply is what leaves the tool, so redaction sits there. |
 | Runtime | Plain Bedrock API calls from Python. No AgentCore, no Strands, no Bedrock Agents. | The tool is a fixed pipeline with no tool loop, no session and no external caller. |
 | Infrastructure | One CloudFormation template, `infrastructure/template.yaml` | Five resources. `AWS::Bedrock::KnowledgeBase` supports `ManagedKnowledgeBaseConfiguration`. |
 | Output | Text in the console. No write-back to Lumis. | Kick-off decision. |
@@ -45,14 +45,13 @@ you want AgentCore Evaluations.
 - The managed Knowledge Base offers built-in or fixed-size chunking only. One
   vector per ticket is not guaranteed. Use a large fixed size and check the chunk
   count after ingestion.
-- `RetrieveAndGenerate` fails with "not supported for managed knowledge bases".
-  `Retrieve` needs `managedSearchConfiguration`, which needs AWS CLI 2.36 or
-  boto3 1.43 or later.
+- A managed Knowledge Base supports `Retrieve` only, not `RetrieveAndGenerate`.
+  `Retrieve` takes `managedSearchConfiguration`, not `vectorSearchConfiguration`,
+  and needs AWS CLI 2.36 or boto3 1.43 or later.
 - Managed Knowledge Base metadata sidecars use typed values:
   `{"key": {"value": {"type": "STRING", "stringValue": "x"}}}`. Types are
-  `STRING`, `NUMBER` and `STRING_LIST`. The S3 connector rejects `BOOLEAN`
-  with "Invalid custom metadata attribute", so booleans are `"true"`/`"false"`
-  strings. The flat format is ignored.
+  `STRING`, `NUMBER` and `STRING_LIST`. `BOOLEAN` is rejected, so booleans are
+  `"true"` and `"false"` strings. The flat format is ignored.
 - Managed Knowledge Base metadata filters support `equals`, `in`, `notIn` and
   range operators. `startsWith` and `stringContains` are not supported.
 - The ingestion job statistics do not explain a failed document. Per-document
@@ -62,15 +61,13 @@ you want AgentCore Evaluations.
   Data source creation is asynchronous; wait for `AVAILABLE` before ingesting.
 - The S3 connector treats one file as one document. The 27 MB export must be
   split into one file per ticket with a `<file>.metadata.json` sidecar.
-- A managed Knowledge Base rejects `vectorSearchConfiguration` at query
-  time. Use `managedSearchConfiguration` for filters and result counts.
-- `Action: ANONYMIZE` alone anonymises model output only. `ApplyGuardrail`
-  with `source INPUT` returns `NONE`. That matches the PII decision above.
+- `Action: ANONYMIZE` anonymises model output only. `ApplyGuardrail` with
+  `source INPUT` returns `NONE`.
 - Guardrail PII masking applies to the API response only. Model invocation logs,
   if enabled, hold unmasked text. Keep invocation logging off or encrypt the log
   group.
-- Re-ingesting a file that already exists in a Knowledge Base fails. Delete the
-  document first. The Boomcoms PoC hit this.
+- Re-ingesting a file that already exists in a Knowledge Base fails. Delete
+  the document first.
 - Tickets combine `thread` (customer), `adminThread` (MLC, `note: true` means
   internal), `parentThread` (parent tenant) and sometimes `systemThread`. Sort by
   `timestamp`. Drop notes and system messages. The `howto` / `bug` type field was
@@ -93,12 +90,10 @@ Once per machine.
 
 - Python 3.12 or later. The ETL uses the standard library only.
 - [uv](https://docs.astral.sh/uv/) for tools: `uv tool install cfn-lint`.
-- AWS CLI 2.36 or later. Older builds reject `managedSearchConfiguration`.
-  The Amazon `.pkg` build lags. `brew install awscli` puts a current build
-  first on PATH.
+- AWS CLI 2.36 or later: `brew install awscli`. Older builds reject
+  `managedSearchConfiguration`.
 - Access to the PoC account `938733851942` in the Lambert Labs organisation
   through the `ll-aws-main` SSO session. Add the profile to `~/.aws/config`.
-  No `-ro` profile exists yet.
 
   ```ini
   [profile mlc-support-poc]
@@ -280,7 +275,7 @@ that produced it.
 | R1 | Split the export into one document per ticket with metadata | implemented | `etl/split_tickets.py`. 6,950 tickets, 13,900 documents, 11 MB. |
 | R2 | Ingest full-thread and customer-only variants side by side | implemented | `equals` filter on `variant` returned customer chunks only (T2, 2026-09-14). |
 | R3 | Redact PII in the drafted reply | partial | The Guardrail unit check anonymised name, phone and email (T4, 2026-09-14). The query-time path needs `demo/draft_reply.py`. |
-| R4 | Retrieve similar past tickets for a new ticket | implemented | `Retrieve` on the 20 ticket sample ranked the matching ticket first at score 0.75 (T1, 2026-09-14). |
+| R4 | Retrieve similar past tickets for a new ticket | implemented | `Retrieve` ranked the matching ticket first at score 0.75 (T1, 2026-09-14). |
 | R5 | Draft a reply with citations to source ticket IDs | validated | `Retrieve` returns chunks with `metadata.ticketId`. The Converse prompt asks the model to cite them. |
 | R6 | Classify the ticket: `howto`, `tenant-data`, `bug`, `unclear` | validated | Same Converse call as R5, or a second cheaper one. |
 | R7 | Signpost for `tenant-data` tickets: name the screen and the data to request | validated | Prompt only. |
