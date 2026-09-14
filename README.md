@@ -51,6 +51,10 @@ you want AgentCore Evaluations.
   Data source creation is asynchronous; wait for `AVAILABLE` before ingesting.
 - The S3 connector treats one file as one document. The 27 MB export must be
   split into one file per ticket with a `<file>.metadata.json` sidecar.
+- A managed Knowledge Base rejects `vectorSearchConfiguration` at query
+  time. Use `managedSearchConfiguration` for filters and result counts.
+- `Action: ANONYMIZE` alone anonymises model output only. `ApplyGuardrail`
+  with `source INPUT` returns `NONE`. Set `InputAction` and `InputEnabled` too.
 - Guardrail PII masking applies to the API response only. Model invocation logs,
   if enabled, hold unmasked text. Keep invocation logging off or encrypt the log
   group.
@@ -175,7 +179,7 @@ aws bedrock-agent-runtime retrieve-and-generate \
 citation has the same `variant`.
 
 ```shell
-  --retrieve-and-generate-configuration "{\"type\":\"KNOWLEDGE_BASE\",\"knowledgeBaseConfiguration\":{\"knowledgeBaseId\":\"$KnowledgeBaseId\",\"modelArn\":\"$ModelArn\",\"retrievalConfiguration\":{\"vectorSearchConfiguration\":{\"filter\":{\"equals\":{\"key\":\"variant\",\"value\":\"customer\"}}}}}}"
+  --retrieve-and-generate-configuration "{\"type\":\"KNOWLEDGE_BASE\",\"knowledgeBaseConfiguration\":{\"knowledgeBaseId\":\"$KnowledgeBaseId\",\"modelArn\":\"$ModelArn\",\"retrievalConfiguration\":{\"managedSearchConfiguration\":{\"filter\":{\"equals\":{\"key\":\"variant\",\"value\":\"customer\"}}}}}}"
 ```
 
 **T3 PII redaction (R3).** Expect `action` = `GUARDRAIL_INTERVENED` and the
