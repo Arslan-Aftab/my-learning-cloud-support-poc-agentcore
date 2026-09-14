@@ -136,47 +136,75 @@ current `aws sso login`.
 ## Deploying
 
 The template creates the ticket bucket, the Knowledge Base role, the managed
-Knowledge Base, the S3 data source and the PII Guardrail. Nothing else is
-needed. The last two commands write the stack outputs and the model ARN to
-`.env`, which git ignores. Every later command reads them from there.
+Knowledge Base, the S3 data source, the ingestion log group and the PII
+Guardrail. Nothing else is needed.
 
-```shell
-cfn-lint --regions eu-west-2 -t infrastructure/template.yaml
-aws cloudformation deploy --stack-name mlc-support-poc \
-  --template-file infrastructure/template.yaml \
-  --capabilities CAPABILITY_NAMED_IAM
-aws cloudformation describe-stacks --stack-name mlc-support-poc \
-  --query 'Stacks[0].Outputs[].join(`=`,[OutputKey,OutputValue])' \
-  --output text | tr '\t' '\n' > .env
-echo "ModelArn=arn:aws:bedrock:eu-west-2:938733851942:inference-profile/eu.anthropic.claude-sonnet-5" >> .env
-```
+1. Lint:
+
+   ```shell
+   cfn-lint --regions eu-west-2 -t infrastructure/template.yaml
+   ```
+
+2. Deploy. Repeat after every template change:
+
+   ```shell
+   aws cloudformation deploy --stack-name mlc-support-poc \
+     --template-file infrastructure/template.yaml \
+     --capabilities CAPABILITY_NAMED_IAM
+   ```
+
+3. Write the stack outputs and the model ARN to `.env`, which git ignores:
+
+   ```shell
+   aws cloudformation describe-stacks --stack-name mlc-support-poc \
+     --query 'Stacks[0].Outputs[].join(`=`,[OutputKey,OutputValue])' \
+     --output text | tr '\t' '\n' > .env
+   echo "ModelArn=arn:aws:bedrock:eu-west-2:938733851942:inference-profile/eu.anthropic.claude-sonnet-5" >> .env
+   ```
 
 Load the variables in each new shell: `set -a; source .env; set +a`.
 
 ## Loading tickets
 
-Repeat when the export changes. Load a small sample first with `--limit 20`,
-check the ingestion result and one retrieval, then load everything.
+Repeat when the export changes. Load a small sample first, check the
+ingestion result and one retrieval, then drop `--limit` and load everything.
 
-```shell
-python3 etl/split_tickets.py data/super-admin.tickets.json out/ --limit 20
-aws s3 sync out/ s3://$BucketName/tickets/ --delete
-aws bedrock-agent start-ingestion-job \
-  --knowledge-base-id $KnowledgeBaseId --data-source-id $DataSourceId
-aws bedrock-agent list-ingestion-jobs \
-  --knowledge-base-id $KnowledgeBaseId --data-source-id $DataSourceId \
-  --query 'ingestionJobSummaries[0].[status,statistics]'
-```
+1. Split the export:
 
-Wait until the status is `COMPLETE` and `numberOfNewDocumentsIndexed` is not
-zero. `--delete` removes files that are no longer in `out/`, which avoids the
-re-ingest failure noted in Findings. If documents fail, read the reasons:
+   ```shell
+   python3 etl/split_tickets.py data/super-admin.tickets.json out/ --limit 20
+   ```
 
-```shell
-aws logs filter-log-events --log-group-name $IngestionLogGroup \
-  --filter-pattern '{ $.event.error_message = * }' \
-  --query 'events[].message' --output text | head
-```
+2. Upload. `--delete` removes files that are no longer in `out/`, which
+   avoids the re-ingest failure noted in Findings:
+
+   ```shell
+   aws s3 sync out/ s3://$BucketName/tickets/ --delete
+   ```
+
+3. Start the ingestion job:
+
+   ```shell
+   aws bedrock-agent start-ingestion-job \
+     --knowledge-base-id $KnowledgeBaseId --data-source-id $DataSourceId
+   ```
+
+4. Poll until the status is `COMPLETE` and `numberOfNewDocumentsIndexed` is
+   not zero:
+
+   ```shell
+   aws bedrock-agent list-ingestion-jobs \
+     --knowledge-base-id $KnowledgeBaseId --data-source-id $DataSourceId \
+     --query 'ingestionJobSummaries[0].[status,statistics]'
+   ```
+
+5. If documents failed, read the reasons:
+
+   ```shell
+   aws logs filter-log-events --log-group-name $IngestionLogGroup \
+     --filter-pattern '{ $.event.error_message = * }' \
+     --query 'events[].message' --output text | head
+   ```
 
 ## Testing
 
