@@ -84,12 +84,17 @@ you want AgentCore Evaluations.
 | `data/` | Local ticket export. Git ignores it. |
 | `out/` | ETL output. Git ignores it. |
 
+Every script carries a [PEP 723](https://peps.python.org/pep-0723/) header that
+names its own dependencies. `uv run <script>` is enough on a clean machine.
+There is no `requirements.txt` and no shared virtual environment.
+
 ## Prerequisites
 
 Once per machine.
 
-- Python 3.12 or later. The ETL uses the standard library only.
-- [uv](https://docs.astral.sh/uv/) for tools: `uv tool install cfn-lint`.
+- [uv](https://docs.astral.sh/uv/). It fetches Python and every dependency,
+  so there is nothing to install first. Run each script with `uv run`.
+- `cfn-lint`: `uv tool install cfn-lint`.
 - AWS CLI 2.36 or later: `brew install awscli`. Older builds reject
   `managedSearchConfiguration`.
 - Access to the PoC account `938733851942` in the Lambert Labs organisation
@@ -148,7 +153,7 @@ ingestion result and one retrieval, then drop `--limit` and load everything.
 1. Split the export:
 
    ```shell
-   python3 etl/split_tickets.py data/super-admin.tickets.json out/ --limit 20
+   uv run etl/split_tickets.py data/super-admin.tickets.json out/ --limit 20
    ```
 
 2. Upload. `--delete` removes files that are no longer in `out/`, which
@@ -225,7 +230,7 @@ Repeat T1 with a filter. Expect every result to have `variant` = `customer`.
 draft that cites the ticket IDs it used and nothing sent anywhere.
 
 ```shell
-python3 demo/draft_reply.py "How do I view completion of a policy that is not mandatory?"
+uv run demo/draft_reply.py "How do I view completion of a policy that is not mandatory?"
 ```
 
 ### T4 Ask a question that surfaces PII

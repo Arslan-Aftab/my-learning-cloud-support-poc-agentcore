@@ -7,15 +7,15 @@ the rules.
 ## Commands
 
 ```shell
-python3 tests/test_split_tickets.py                                  # ETL self-check
-python3 etl/split_tickets.py data/super-admin.tickets.json out/      # split the export
-cfn-lint --regions eu-west-2 -t infrastructure/template.yaml         # lint the stack
+uv run tests/test_split_tickets.py                               # ETL self-check
+uv run etl/split_tickets.py data/super-admin.tickets.json out/   # split the export
+cfn-lint --regions eu-west-2 -t infrastructure/template.yaml     # lint the stack
 ```
 
-`cfn-lint` is installed with `uv tool install cfn-lint`.
-
-Standard library only so far. Add `boto3` to `requirements.txt` when `demo/`
-needs it.
+Every script runs with `uv run`. Each one declares its own dependencies in a
+[PEP 723](https://peps.python.org/pep-0723/) header, so nobody installs
+anything first. There is no `requirements.txt` and no shared virtual
+environment. `cfn-lint` is installed with `uv tool install cfn-lint`.
 
 ## Rules
 

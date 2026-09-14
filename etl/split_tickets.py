@@ -1,6 +1,10 @@
+# /// script
+# requires-python = ">=3.12"
+# dependencies = []
+# ///
 """Split the Lumis ticket export into one Knowledge Base document per ticket.
 
-Usage: python3 etl/split_tickets.py data/super-admin.tickets.json out/ [--limit N]
+Usage: uv run etl/split_tickets.py data/super-admin.tickets.json out/ [--limit N]
 
 Writes out/<variant>/<ticketId>.md and a .metadata.json sidecar for each,
 where variant is "full" (whole conversation) or "customer" (subject and
