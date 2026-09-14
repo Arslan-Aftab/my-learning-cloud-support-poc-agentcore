@@ -93,58 +93,100 @@ a spike show it works. `out` = not possible or out of scope.
 | `data/` | Local ticket export. Git ignores it. |
 | `out/` | ETL output. Git ignores it. |
 
-## Setup
+## Prerequisites
 
-Once per machine. The PoC account is `938733851942` in the Lambert Labs
-organisation. No `-ro` profile exists yet.
+Once per machine.
 
-1. Add the profile to `~/.aws/config`. The `ll-aws-main` SSO session already
-   exists on Lambert Labs machines.
+- Python 3.12 or later. The ETL uses the standard library only.
+- [uv](https://docs.astral.sh/uv/) for tools: `uv tool install cfn-lint`.
+- AWS CLI v2.
+- Access to the PoC account `938733851942` in the Lambert Labs organisation
+  through the `ll-aws-main` SSO session. Add the profile to `~/.aws/config`.
+  No `-ro` profile exists yet.
 
-   ```ini
-   [profile mlc-support-poc]
-   sso_session = ll-aws-main
-   sso_account_id = 938733851942
-   sso_role_name = AdministratorAccess
-   region = eu-west-2
-   ```
+  ```ini
+  [profile mlc-support-poc]
+  sso_session = ll-aws-main
+  sso_account_id = 938733851942
+  sso_role_name = AdministratorAccess
+  region = eu-west-2
+  ```
 
-2. Install the linter: `uv tool install cfn-lint`.
-3. Log in and deploy. The template creates the ticket bucket, the Knowledge
-   Base role, the managed Knowledge Base, the S3 data source and the PII
-   Guardrail. Nothing else is needed.
+- The ticket export. Download `super-admin.tickets.json` from the project
+  Drive folder to `data/`. The password is in the Teams chat. Never commit it.
 
-   ```shell
-   export AWS_PROFILE=mlc-support-poc
-   aws sso login
-   cfn-lint --regions eu-west-2 -t infrastructure/template.yaml
-   aws cloudformation deploy --stack-name mlc-support-poc \
-     --template-file infrastructure/template.yaml \
-     --capabilities CAPABILITY_NAMED_IAM
-   aws cloudformation describe-stacks --stack-name mlc-support-poc \
-     --query 'Stacks[0].Outputs' --output table
-   ```
+Every command below assumes `export AWS_PROFILE=mlc-support-poc` and a
+current `aws sso login`.
 
-   The outputs `BucketName`, `KnowledgeBaseId`, `DataSourceId` and
-   `GuardrailId` are used below.
+## Deploying
+
+The template creates the ticket bucket, the Knowledge Base role, the managed
+Knowledge Base, the S3 data source and the PII Guardrail. Nothing else is
+needed.
+
+```shell
+cfn-lint --regions eu-west-2 -t infrastructure/template.yaml
+aws cloudformation deploy --stack-name mlc-support-poc \
+  --template-file infrastructure/template.yaml \
+  --capabilities CAPABILITY_NAMED_IAM
+aws cloudformation describe-stacks --stack-name mlc-support-poc \
+  --query 'Stacks[0].Outputs' --output table
+```
+
+The outputs `BucketName`, `KnowledgeBaseId`, `DataSourceId`, `GuardrailId`
+and `GuardrailVersion` are used below.
 
 ## Loading tickets
 
 Repeat when the export changes.
 
-1. Download `super-admin.tickets.json` from the project Drive folder to
-   `data/`. The password is in the Teams chat. Never commit it.
-2. Split it: `python3 etl/split_tickets.py data/super-admin.tickets.json out/`
-3. Upload and ingest:
+```shell
+python3 etl/split_tickets.py data/super-admin.tickets.json out/
+aws s3 sync out/ s3://<BucketName>/tickets/ --delete
+aws bedrock-agent start-ingestion-job \
+  --knowledge-base-id <KnowledgeBaseId> --data-source-id <DataSourceId>
+aws bedrock-agent list-ingestion-jobs \
+  --knowledge-base-id <KnowledgeBaseId> --data-source-id <DataSourceId> \
+  --query 'ingestionJobSummaries[0].[status,statistics]'
+```
 
-   ```shell
-   aws s3 sync out/ s3://<BucketName>/tickets/ --delete
-   aws bedrock-agent start-ingestion-job \
-     --knowledge-base-id <KnowledgeBaseId> --data-source-id <DataSourceId>
-   aws bedrock-agent list-ingestion-jobs \
-     --knowledge-base-id <KnowledgeBaseId> --data-source-id <DataSourceId> \
-     --query 'ingestionJobSummaries[0].[status,statistics]'
-   ```
+Wait until the status is `COMPLETE`. `--delete` removes files that are no
+longer in `out/`, which avoids the re-ingest failure noted in Findings.
 
-   Wait until the status is `COMPLETE`. `--delete` removes files that are no
-   longer in `out/`, which avoids the re-ingest failure noted in Findings.
+## Testing
+
+Each test maps to a requirement. Record the result in the requirements table.
+
+**T1 Retrieve and generate (R4, R5).** Find the `eu.` Sonnet inference
+profile, then ask a how-to question. Expect a reply plus citations whose
+`metadata.ticketId` values are real ticket IDs.
+
+```shell
+aws bedrock list-inference-profiles \
+  --query "inferenceProfileSummaries[?starts_with(inferenceProfileId,'eu.anthropic.claude-sonnet')].inferenceProfileArn"
+aws bedrock-agent-runtime retrieve-and-generate \
+  --input '{"text":"How do I view completion of a policy that is not mandatory?"}' \
+  --retrieve-and-generate-configuration '{"type":"KNOWLEDGE_BASE","knowledgeBaseConfiguration":{"knowledgeBaseId":"<KnowledgeBaseId>","modelArn":"<ModelArn>"}}'
+```
+
+**T2 Variant filter (R2).** Repeat T1 with a filter and confirm every
+citation has the same `variant`.
+
+```shell
+--retrieve-and-generate-configuration '{"type":"KNOWLEDGE_BASE","knowledgeBaseConfiguration":{"knowledgeBaseId":"<KnowledgeBaseId>","modelArn":"<ModelArn>","retrievalConfiguration":{"vectorSearchConfiguration":{"filter":{"equals":{"key":"variant","value":"customer"}}}}}}'
+```
+
+**T3 PII redaction (R3).** Expect `action` = `GUARDRAIL_INTERVENED` and the
+name, phone and email replaced with `{NAME}`, `{PHONE}` and `{EMAIL}`.
+
+```shell
+aws bedrock-runtime apply-guardrail \
+  --guardrail-identifier <GuardrailId> --guardrail-version <GuardrailVersion> \
+  --source INPUT \
+  --content '[{"text":{"text":"Please call Jane Smith on 07700 900123 or email jane@example.com"}}]'
+```
+
+**T4 PII redaction at query time (R3).** Repeat T1 with
+`"guardrailConfiguration":{"guardrailId":"<GuardrailId>","guardrailVersion":"<GuardrailVersion>"}`
+inside `knowledgeBaseConfiguration` and a question that names a person.
+Expect no personal name in the reply.
