@@ -112,8 +112,7 @@ Once per machine.
 - The ticket export. Download `super-admin.tickets.json` from the project
   Drive folder to `data/`. The password is in the Teams chat. Never commit it.
 
-Every command below assumes `export AWS_PROFILE=mlc-support-poc` and a
-current `aws sso login`.
+Sign in before each session: `aws sso login --profile mlc-support-poc`.
 
 ## Deploying
 
@@ -131,20 +130,27 @@ Guardrail. Nothing else is needed.
 
    ```shell
    aws cloudformation deploy --stack-name mlc-support-poc \
+     --profile mlc-support-poc --region eu-west-2 \
      --template-file infrastructure/template.yaml \
      --capabilities CAPABILITY_NAMED_IAM
    ```
 
-3. Write the stack outputs and the model ARN to `.env`, which git ignores:
+3. Write the profile, the region, the stack outputs and the model ARN to
+   `.env`, which git ignores:
 
    ```shell
-   aws cloudformation describe-stacks --stack-name mlc-support-poc \
-     --query 'Stacks[0].Outputs[].join(`=`,[OutputKey,OutputValue])' \
-     --output text | tr '\t' '\n' > .env
-   echo "ModelArn=arn:aws:bedrock:eu-west-2:938733851942:inference-profile/eu.anthropic.claude-sonnet-5" >> .env
+   { echo "AWS_PROFILE=mlc-support-poc"
+     echo "AWS_REGION=eu-west-2"
+     echo "ModelArn=arn:aws:bedrock:eu-west-2:938733851942:inference-profile/eu.anthropic.claude-sonnet-5"
+     aws cloudformation describe-stacks --stack-name mlc-support-poc \
+       --profile mlc-support-poc --region eu-west-2 \
+       --query 'Stacks[0].Outputs[].join(`=`,[OutputKey,OutputValue])' \
+       --output text | tr '\t' '\n'
+   } > .env
    ```
 
-Load the variables in each new shell: `set -a; source .env; set +a`.
+Load the variables in each new shell: `set -a; source .env; set +a`. That one
+line sets the profile and the region, so no command below needs a flag.
 
 ## Loading tickets
 
