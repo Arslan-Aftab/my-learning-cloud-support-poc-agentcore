@@ -36,6 +36,7 @@ new ticket ──► demo/draft_reply.py ──► Retrieve ──► Converse +
 | Corpus scope | Escalated tickets only, including tickets assigned to developers. Up to 200 tickets from three tenants in the PoC, not all 6,950. | Kick-off decision on escalation. Thousands of tickets add index bloat that no test refers to. |
 | Document format | One Markdown file per ticket. Structured fields go in the `.metadata.json` sidecar. | The S3 connector accepts `.txt`, `.md`, `.html`, `.docx`, `.csv`, `.xlsx` and `.pdf`. It does not accept `.json` as a document. Markdown gives the embedding model prose without keys and braces. |
 | Bad tickets | Keep all. Store `reopened` as metadata. Test with and without a filter. | Scott's "closed twice" heuristic is a signal, not a verdict. |
+| Evaluation | Bedrock Evaluations, retrieve-and-generate RAG job, **bring your own inference responses**. Reference response is the real MLC reply from the `full` variant. The pipeline sees only the `customer` variant. | A first-party job, not a hand-written harness. MLC can rerun it after the PoC to test a new prompt or a new Knowledge Base setup. |
 
 Add AgentCore only when Lumis calls the tool over HTTP, when the agent needs the
 Lumis API through a Gateway with permissions separate from a user token, when
@@ -73,6 +74,66 @@ you want AgentCore Evaluations, or for the retrieval loop in R17.
   internal), `parentThread` (parent tenant) and sometimes `systemThread`. Sort by
   `timestamp`. Drop notes and system messages. The `howto` / `bug` type field was
   never used.
+
+### Evaluation (R10)
+
+Amazon Bedrock Evaluations runs RAG evaluation jobs against a Knowledge Base:
+[Evaluate the performance of RAG sources](https://docs.aws.amazon.com/bedrock/latest/userguide/evaluation-kb.html).
+There are two job types. A **retrieve-only** job scores the chunks a Knowledge
+Base returns. A **retrieve-and-generate** job scores the chunks and the
+generated answer together, with LLM-as-a-judge metrics: correctness,
+completeness, faithfulness (hallucination), citation precision, citation
+coverage and harmfulness
+([Evaluate model performance using another LLM as a judge](https://docs.aws.amazon.com/bedrock/latest/userguide/evaluation-judge.html)).
+
+A **managed** Knowledge Base is a valid inference source for a RAG evaluation
+job: the same `KnowledgeBaseIdentifier` used for `Retrieve` calls works here
+([Creating a retrieve-and-generate RAG evaluation job](https://docs.aws.amazon.com/bedrock/latest/userguide/knowledge-base-evaluation-create-randg.html)).
+But the tool does not call `RetrieveAndGenerate` on a managed Knowledge Base
+(see Findings above), so the job cannot invoke the Knowledge Base for us end
+to end. The **bring your own inference responses** option covers this: pick
+"Bring your own inference responses" as the inference source, and Bedrock
+skips its own retrieve-and-generate step and grades the output we supply
+([Inference source for Knowledge Base evaluation](https://docs.aws.amazon.com/help-panel/bedrock/latest/console/hp-kb-evaluation-inference.html)).
+Evaluator (judge) models listed for eu-west-2 include Anthropic Claude 3.5
+Sonnet v2, Claude 3.7 Sonnet, Claude Sonnet 4 and Amazon Nova Pro
+([Supported evaluator models](https://docs.aws.amazon.com/bedrock/latest/userguide/evaluation-judge.html)).
+
+The dataset is a JSONL prompt file in S3. For a bring-your-own-responses job,
+each line holds a `conversationTurns` array with `prompt` (the ticket query),
+`referenceResponses` (the real MLC reply), and an `output` block that carries
+our own `knowledgeBaseIdentifier` and `retrievedResults`. `referenceContexts`
+is optional and only feeds custom metrics, not the built-in ones
+([Create a prompt dataset for retrieve-only RAG evaluation jobs](https://docs.aws.amazon.com/bedrock/latest/userguide/knowledge-base-evaluation-prompt-retrieve.html)).
+
+Bedrock Evaluations has no per-job fee. Cost is the judge model's on-demand
+token price for the input it reads (prompt, retrieved context, generated
+answer) and the output it writes (score and explanation), billed the same way
+as any other model invocation
+([Amazon Bedrock pricing](https://aws.amazon.com/bedrock/pricing/)). For a few
+hundred held-out tickets this is a few dollars, not a line item to plan
+around.
+
+Nothing in Bedrock evaluates a prompt or a Guardrail directly. Prompt
+management lets you version prompt variants and run one manually in the
+console's prompt builder, and Guardrails has a console test panel, but
+neither compares an output against a reference response or produces a metric
+([Construct and store reusable prompts with Prompt management](https://docs.aws.amazon.com/bedrock/latest/userguide/prompt-management.html)).
+Both are for trying a change by hand, not for scoring it against held-out
+tickets, so R10 still needs the RAG evaluation job above.
+
+**Recommended path**: one retrieve-and-generate RAG evaluation job, bring
+your own inference responses. A small Python script still has to: split each
+held-out ticket's `full` variant into prompt (customer side) and reference
+response (MLC's reply); run one `Retrieve` plus `Converse` call per ticket
+against the `customer`-only index, the same pipeline the tool uses at query
+time; write one JSONL line per ticket with `prompt`, `referenceResponses` and
+our `output.retrievedResults`; upload the file to S3; and call
+`CreateEvaluationJob` (or the console) with that S3 URI. Bedrock does the
+judging. If a managed Knowledge Base or our two-call output shape ever stops
+being accepted by the bring-your-own path, the fallback is the hand-written
+Python harness the requirement first proposed: same held-out set, same LLM
+judge prompt, called directly instead of through a Bedrock evaluation job.
 
 ## Repo layout
 
@@ -325,7 +386,7 @@ The Note column holds the evidence and the test that produced it.
 | R7 | Signpost for `tenant-data` tickets: name the screen and the data to request | validated | Prompt only. |
 | R8 | Human review of every draft | validated | Output is console text. Nothing is sent. |
 | R9 | Data stays in UK or EU | validated | `eu-west-2` plus `eu.` inference profile. |
-| R10 | Evaluate drafts against real MLC replies on held-out tickets | validated | Manual review first. LLM judge later. |
+| R10 | Evaluate drafts against real MLC replies on held-out tickets | partial | Path chosen: Bedrock Evaluations, retrieve-and-generate RAG job, bring your own inference responses (see Findings). Not built. |
 | R11 | Keep idle infra cost near zero | validated | Managed Knowledge Base bills storage and retrievals only. |
 | R12 | Answer questions that need live tenant data from Lumis | out | No Lumis API in scope. The draft asks the customer for the data. |
 | R13 | Write suggestions back into Lumis | out | Kick-off decision. |
