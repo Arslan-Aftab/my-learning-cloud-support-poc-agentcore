@@ -114,17 +114,7 @@ Once per machine.
 - The ticket export. Download `super-admin.tickets.json` from the project
   Drive folder to `data/`. The password is in the Teams chat. Never commit it.
 
-## Every shell
-
-Run this in each new terminal before any command below. Every `aws` command
-and every script reads the profile, the region and the stack outputs from the
-environment, and fails with a credentials or a `KeyError` message without it.
-`.env` exists after the [deploy](#deploying) step.
-
-```shell
-aws sso login --profile mlc-support-poc
-set -a; source .env; set +a
-```
+Sign in before each session: `aws sso login --profile mlc-support-poc`.
 
 > **Note** A new account cannot call Claude Sonnet 5 until AWS has verified
 > it. The call fails with `AccessDeniedException: Your account is currently
@@ -174,7 +164,12 @@ Guardrail. Nothing else is needed.
 
 Repeat when the export changes. Load a small sample first, check the
 ingestion result and one retrieval, then load the three tenants.
-New terminal? Run [Every shell](#every-shell) first.
+
+In each new shell:
+
+```shell
+set -a; source .env; set +a
+```
 
 1. Split the export:
 
@@ -224,8 +219,13 @@ New terminal? Run [Every shell](#every-shell) first.
 
 Each test has one meaning. The table below is the only place that maps tests
 to requirements. When a test passes, record the date and the evidence in the
-[requirements](#requirements) table at the end of this file. New terminal?
-Run [Every shell](#every-shell) first.
+[requirements](#requirements) table at the end of this file.
+
+In each new shell:
+
+```shell
+set -a; source .env; set +a
+```
 
 | Test | Meaning | Requirements |
 |---|---|---|
