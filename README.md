@@ -116,14 +116,11 @@ Once per machine.
 
 Sign in before each session: `aws sso login --profile mlc-support-poc`.
 
-> **Note** A new account cannot call Claude Sonnet 5 until AWS has verified
-> it. The call fails with `AccessDeniedException: Your account is currently
-> being verified`. This is an AWS fraud check on new accounts, not a model
-> access setting. Haiku is not gated, so until the check clears put
-> `ModelArn=eu.anthropic.claude-haiku-4-5-20251001-v1:0` in `.env` in place
-> of the Sonnet ARN. To clear Sonnet: confirm the account has a valid payment
-> method, retry after two hours, and if it still fails email
-> aws-verification@amazon.com or open an AWS Support case.
+> **Note** A new AWS account cannot call Claude Sonnet 5 until AWS has
+> verified it, which takes a few hours. The call fails with
+> `AccessDeniedException: Your account is currently being verified`. Until it
+> clears, put `ModelArn=eu.anthropic.claude-haiku-4-5-20251001-v1:0` in
+> `.env`.
 
 ## Deploying
 

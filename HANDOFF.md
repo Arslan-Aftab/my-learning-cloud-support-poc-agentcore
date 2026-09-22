@@ -33,8 +33,6 @@ has not been tried in a browser.
 
 ## Open decisions
 
-- Sonnet 5 is blocked by AWS account verification. See the README note under
-  Prerequisites. Retry it before the Sonnet against Haiku decision.
 - No `-ro` profile exists. Every command runs as admin today.
 - MLC staff see every tenant's tickets in the index. Customer isolation is
   unresolved, and it matters before anything leaves a demo.

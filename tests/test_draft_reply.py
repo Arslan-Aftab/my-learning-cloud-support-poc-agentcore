@@ -25,7 +25,7 @@ class Fake:
 
     def converse(self, **kw):
         calls["converse"] = kw
-        return {"output": {"message": {"content": [{"text": "Label: howto\nDo this [T1]."}]}}}
+        return {"output": {"message": {"content": [{"reasoningContent": {}}, {"text": "Label: howto\nDo this [T1]."}]}}}
 
 
 draft_reply.boto3.client = lambda name: Fake()

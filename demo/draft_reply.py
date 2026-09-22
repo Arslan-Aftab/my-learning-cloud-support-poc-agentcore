@@ -48,7 +48,7 @@ def draft(question, tenant=None, variant="full", n=5, model_arn=None):
     context = "\n\n".join(
         f"### Ticket {s['ticketId']} ({s['variant']}, score {s['score']:.2f})\n{s['text']}" for s in sources
     )
-    reply = boto3.client("bedrock-runtime").converse(
+    content = boto3.client("bedrock-runtime").converse(
         modelId=model_arn or env["ModelArn"],
         system=[{"text": SYSTEM}],
         messages=[{"role": "user", "content": [{"text": f"## Past tickets\n\n{context}\n\n## New ticket\n\n{question}"}]}],
@@ -57,7 +57,9 @@ def draft(question, tenant=None, variant="full", n=5, model_arn=None):
             "guardrailVersion": env["GuardrailVersion"],
             "trace": "disabled",
         },
-    )["output"]["message"]["content"][0]["text"].strip()
+    )["output"]["message"]["content"]
+    # Sonnet 5 emits a reasoningContent block before the text.
+    reply = next(b["text"] for b in content if "text" in b).strip()
     first, _, rest = reply.partition("\n")
     label = first.removeprefix("Label:").strip().lower() if first.startswith("Label:") else "unclear"
     return {"label": label, "draft": rest.strip() if first.startswith("Label:") else reply, "sources": sources}
