@@ -3,7 +3,12 @@
 An interactive spreadsheet for the customer. They change the parameters on
 one sheet. Every total updates, for on-demand and batch, side by side.
 
-Sheet: [MLC Support PoC - Cost model](https://docs.google.com/spreadsheets/d/1i_Z4ruttKKa0HeBZGHM6ns01GpLnOxYcPn-4FiL9E0M/edit)
+Sheet: [MLC Support PoC - Cost model (v2, Price List API)](https://docs.google.com/spreadsheets/d/1coA0X3obxz3E-woCLGM6YsqSg4NHssy53Y5wC_UasHs/edit)
+
+> **Note** The Drive `create_file` tool has no in-place update for content, only
+> for title and parent folder, so each regenerate publishes a new file. The
+> [first version](https://docs.google.com/spreadsheets/d/1i_Z4ruttKKa0HeBZGHM6ns01GpLnOxYcPn-4FiL9E0M/edit)
+> (web-page prices) is superseded by the one above (Price List API prices).
 
 ## Regenerate the sheet
 
@@ -11,7 +16,12 @@ Sheet: [MLC Support PoC - Cost model](https://docs.google.com/spreadsheets/d/1i_
 uv run tools/cost_model.py
 ```
 
-This writes `out/cost-model.xlsx`. Upload it to the project Drive folder by
+This writes `out/cost-model.xlsx`. The script fetches every verifiable price
+live from the read-only AWS Price List API (region `us-east-1`, using the
+`AWS_PROFILE` in the environment); a rerun refreshes them. Anything the API
+does not carry falls back to a hand-entered value, flagged on the Prices
+sheet. If boto3 or AWS credentials are unavailable, every price falls back
+and the script still runs. Upload the result to the project Drive folder by
 hand, or re-run the upload through the Drive tool if you have MCP access.
 
 ## Sheets
@@ -19,7 +29,7 @@ hand, or re-run the upload through the Drive tool if you have MCP access.
 | Sheet | Holds |
 | --- | --- |
 | Inputs | The orange, editable cells: queries per day, tokens per draft, Knowledge Base and Guardrail usage, fixed items. |
-| Prices | Every unit price, with its source URL, the date checked, and a verified/unverified flag. |
+| Prices | Every unit price, with its source, the date checked, and a verified/unverified flag. |
 | Estimate | One row per cost line, a formula for on-demand and a formula for batch, and a total. |
 | Spend to date | The account's real AWS Cost Explorer spend, for comparison against the estimate. |
 
@@ -34,6 +44,17 @@ recalculates every total.
 - 2 Guardrail text units per query (input + output).
 - 1 GB S3 storage, 1 GB/month CloudWatch Logs.
 - Batch price is 50% of on-demand (Amazon Bedrock batch inference discount).
+
+## Default monthly total
+
+At the default inputs (4,400 queries/month, 3,000 input / 500 output tokens),
+with the fixed items ($13.82/month: Knowledge Base, Guardrails, S3,
+CloudWatch):
+
+| Model | On-demand | Batch |
+| --- | --- | --- |
+| Claude Sonnet 5 (NOT VERIFIED, see below) | $86.42 | $50.12 |
+| Claude Haiku 4.5 (verified) | $38.02 | $25.92 |
 
 ## Spend to date
 
@@ -59,33 +80,41 @@ inference has been billed yet, since the demo runs are still small.
 
 ## Price sources
 
-Every price on the Prices sheet carries its own URL. Two prices could not be
-verified this session and are flagged in the sheet:
+Prices come from the read-only [AWS Price List API](https://docs.aws.amazon.com/awsaccountbilling/latest/aboutv2/using-price-list-query-api.html)
+(`aws pricing get-products`, region `us-east-1`), not the pricing web page.
+Ten of fourteen prices are fetched live and confirmed against real SKUs in
+`eu-west-2`, cross-checked against this account's own Cost Explorer usage
+where an equivalent usage type exists:
 
-- **Claude Sonnet 5 and Claude Haiku 4.5, on-demand and batch, eu-west-2.**
-  The [Amazon Bedrock pricing page](https://aws.amazon.com/bedrock/pricing/)
-  renders its model tables through a JavaScript tab widget. The page fetch
-  this session returned the "Models with extended access" table (legacy
-  Claude 3.5 Sonnet) but not the current Sonnet 5 / Haiku 4.5 rows, and no
-  region split. The Sonnet figures on the sheet ($3.00 input / $15.00 output
-  per 1M tokens) are the published cross-region on-demand rate, carried over
-  from this repo's own README findings (R18). Confirm both models' eu-west-2
-  rate in the Bedrock console before quoting a customer. The Haiku cells are
-  left at $0 and flagged, since no figure could be sourced at all.
-- **Guardrail contextual grounding**, per 1,000 text units: no published
-  figure found. Flagged $0 on the sheet.
-- **Knowledge Base storage and retrieval price**: carried over from this
-  repo's README Decisions table ($5/GB/month, $1/1,000 retrievals), not
-  independently re-confirmed against the pricing page this session.
-- **S3 Standard storage and CloudWatch Logs ingestion**: US East rates
-  ($0.023/GB/month and $0.50/GB) used as a stand-in; eu-west-2 is usually
-  close but not identical. Check `aws.amazon.com/s3/pricing` and
-  `aws.amazon.com/cloudwatch/pricing`.
+| Item | Price | API source |
+| --- | --- | --- |
+| Claude Haiku 4.5, on-demand input | $1.00 / 1M tokens | `AmazonBedrockMarketplace`, `EUW2-MP:EUW2_InputTokenCount_Global-Units` |
+| Claude Haiku 4.5, on-demand output | $5.00 / 1M tokens | `AmazonBedrockMarketplace`, `EUW2-MP:EUW2_OutputTokenCount_Global-Units` |
+| Claude Haiku 4.5, batch input | $0.50 / 1M tokens | `AmazonBedrockMarketplace`, `EUW2-MP:EUW2_InputTokenCount_Global_Batch-Units` |
+| Claude Haiku 4.5, batch output | $2.50 / 1M tokens | `AmazonBedrockMarketplace`, `EUW2-MP:EUW2_OutputTokenCount_Global_Batch-Units` |
+| Knowledge Base storage | $5.00 / GB / month | `AmazonKnowledgeBase`, `EUW2-Knowledge-Base:Consumption-based:Storage` |
+| Knowledge Base retrieval | $1.00 / 1,000 retrievals | `AmazonKnowledgeBase`, `EUW2-Knowledge-Base:Consumption-based:Retrieval` |
+| Guardrail sensitive information filter | $0.10 / 1,000 text units | `AmazonBedrock`, `EUW2-Guardrail-SensitiveInformationPolicyPaidUnitsConsumed`; matches this account's Cost Explorer usage exactly |
+| Guardrail contextual grounding | $0.10 / 1,000 text units | `AmazonBedrock`, `EUW2-Guardrail-ContextualGroundingPolicyUnitsConsumed` |
+| S3 Standard storage | $0.024 / GB / month | `AmazonS3`, first-tier `TimedStorage-ByteHrs`, `eu-west-2` |
+| CloudWatch Logs ingestion | $0.5985 / GB | `AmazonCloudWatch`, `EUW2-DataProcessing-Bytes` |
 
-The **Guardrail sensitive information filter** price ($0.10 per 1,000 text
-units) is verified: it matches this account's own Cost Explorer usage
-(`EUW2-Guardrail-SensitiveInformationPolicyPaidUnitsConsumed`, $0.0002 for 2
-units).
+The `EUW2_..._Global-Units` usage types are the `eu.` cross-region inference
+profile this repo uses (README ARN `eu.anthropic.claude-haiku-4-5-...`); the
+API also has a non-Global, single-region rate that costs more ($1.10 /
+$5.50 per 1M tokens on-demand), not used here.
+
+**Claude Sonnet 5 could not be verified**, on-demand or batch, at any price.
+`aws pricing get-attribute-values --service-code AmazonBedrockMarketplace
+--attribute-name model` lists every Anthropic model AWS Marketplace prices
+in this account, including Claude Haiku 4.5, Claude Sonnet 4/4.5/4.6, and
+even this agent's own "Claude Fable 5" -- but no "Claude Sonnet 5". It is
+genuinely absent from the Price List API's Marketplace catalog, consistent
+with this repo's README note that a new account's first Sonnet 5 call fails
+until AWS activates the Marketplace subscription. The sheet keeps the
+$3.00 / $15.00 per 1M token fallback from README's R18 finding, with batch
+assumed at 50%, both flagged NOT VERIFIED. Recheck the console once Sonnet 5
+is confirmed active on this account.
 
 ## Template
 
