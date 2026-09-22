@@ -158,6 +158,43 @@ Resources:
             Threshold: 0.5
             Action: NONE
 
+  EvaluationRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${Prefix}-eval-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: bedrock.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnEquals:
+                aws:SourceArn: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:evaluation-job/*"
+      Policies:
+        - PolicyName: eval-dataset-and-output
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !GetAtt TicketBucket.Arn
+                Condition:
+                  StringLike:
+                    s3:prefix: "eval/*"
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                Resource: !Sub "${TicketBucket.Arn}/eval/*"
+              - Effect: Allow
+                # R10: Claude 3.7 Sonnet, the judge model. See docs/evaluation.md.
+                Action: bedrock:InvokeModel
+                Resource: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/anthropic.claude-3-7-sonnet-20250219-v1:0"
+
   PiiGuardrailVersion:
     Type: AWS::Bedrock::GuardrailVersion
     Properties:
@@ -177,3 +214,5 @@ Outputs:
     Value: !GetAtt PiiGuardrail.GuardrailId
   GuardrailVersion:
     Value: !GetAtt PiiGuardrailVersion.Version
+  EvaluationRoleArn:
+    Value: !GetAtt EvaluationRole.Arn
