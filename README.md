@@ -157,10 +157,12 @@ set -a; source .env; set +a
 uv run demo/app.py
 ```
 
-The page opens in a browser. The sidebar holds three settings: **Model**
-(Sonnet or Haiku), **Ticket contents** (full thread or customer only), and
-**Tenant** (empty searches all tenants). Paste a question in the box and
-click **Draft reply**.
+The page opens in a browser. The sidebar holds **Model** (Sonnet or Haiku),
+**Ticket contents** (full thread or customer only), **Tenant** (empty
+searches all tenants) and **Grounding threshold**. Paste a question in the
+box and click **Draft reply**. The page shows the query type, the notes for
+the agent, the grounding scores from the Guardrail trace and the draft. A
+draft whose grounding or relevance score is below the threshold is withheld.
 
 > **Note** The same pipeline runs from the command line, with no browser:
 > `uv run demo/draft_reply.py "<question>"`.
@@ -204,15 +206,40 @@ reaches model output, confirmed by a unit call, but no sample run has made
 the Guardrail fire on this query-time path, because Sonnet 5 paraphrases
 rather than quotes its sources.
 
-### Ask something the tickets cannot answer, see an unclear label or a refused draft
+### Ask something the tickets cannot answer, see a withheld draft
 
-Ask a question with no match in the loaded sample. Today the label is
-unreliable: an `unclear` question came back labelled `tenant-data`, not
-`unclear`, in both variants.
+Ask a question with no match in the loaded sample, for example a refund
+policy. The grounding score falls below the threshold and the page withholds
+the draft. Lower the slider to read it anyway.
 
-**Proves:** R6, partly. R19 is not yet deployed; once the contextual
-grounding Guardrail is live, a question the sources cannot support should
-instead return a blocked or flagged draft.
+**Proves:** R6 and R19, once verified live. The `unclear` label was
+unreliable before structured output; the enum now forces one of the four
+values, but a live run has not yet confirmed the model picks `unclear`.
+
+### Ask something off topic, see the holding message
+
+Paste:
+
+```
+How do I change a flat tyre?
+```
+
+The Guardrail denied topic blocks the question before the model runs. The
+page shows the holding message in place of a draft.
+
+**Proves:** R21, once verified live.
+
+### Expected results
+
+| Question | Query type | Guardrail |
+|---|---|---|
+| How do I view completion of a policy? | `howto` | pass |
+| How do I reset a learner's password? | `howto` | pass |
+| Compliance report for our tenant shows wrong numbers | `tenant-data` | pass, names the screen and data to request |
+| Users get a 500 error when they open a course | `bug` | pass |
+| What is your refund policy? | `unclear` | grounding below threshold, draft withheld |
+| How do I change a flat tyre? | none | denied topic, holding message |
+| My learner john.smith@acme.com is locked out | `howto` | pass, email masked in the draft |
 
 ### Filter to one tenant, see the sources change
 
@@ -248,7 +275,8 @@ The Note column names the demo scenario and the date that proved it.
 | R16 | Ground-truth knowledge base or how-to wiki | out | Deferred at the deep dive. |
 | R17 | Agentic retrieval: plan the search, query again with new filters or terms until the sources are useful | open | Spike on `AgenticRetrieveStream`. It is built into managed Knowledge Bases, takes metadata filters per retriever, and streams a cited answer, so it may replace `Retrieve` plus `Converse`. Its Guardrail supports `BLOCK` only, not `MASK`, so R3 needs a separate `ApplyGuardrail` call on the answer. Compare draft quality and cost against the one-shot path. |
 | R18 | Batch processing to cut cost | partial | Design settled: on-demand front end, nightly batch job for new tickets. AgentCore Runtime has no batch mode. No batch job has run yet with our model ID, and the batch model table lists Sonnet 4.5, not Sonnet 5. See Findings. |
-| R19 | Ground every draft in the retrieved tickets and minimise hallucination | partial | The Guardrail contextual grounding policy is in `infrastructure/template.yaml` (GROUNDING and RELEVANCE, threshold 0.5) and `demo/draft_reply.py` passes the retrieved chunks and the question as `guardContent` with `grounding_source` and `query` qualifiers. `cfn-lint` passes. Deploy and a live run are pending; see "Ask something the tickets cannot answer" in Demo. |
+| R19 | Ground every draft in the retrieved tickets and minimise hallucination | partial | The Guardrail scores GROUNDING and RELEVANCE with `Action: NONE`; `demo/draft_reply.py` reads the scores from the trace and the app withholds a draft below the sidebar threshold. `cfn-lint` passes. The first deploy at threshold 0.5 with `BLOCK` refused a valid how-to question on `main` (2026-09-22), which is why the threshold moved to the app. Live run of the score-only version pending. |
+| R21 | Refuse questions that are not about My Learning Cloud with a holding message | partial | Classic-tier denied topic in `infrastructure/template.yaml`, blocked on input. `cfn-lint` passes. Deploy and live run pending; see "Ask something off topic" in Demo. |
 | R20 | Detailed testing on the 20 ticket sample before the full corpus is loaded | implemented | The Demo scenarios ran on Sonnet 5 across all four classes and both variants on the 20 ticket sample (2026-09-22). See R3, R6, R7 for the findings. The full load can proceed. |
 
 ## Decisions
@@ -269,7 +297,9 @@ The Note column names the demo scenario and the date that proved it.
 | Bad tickets | Keep all. Store `reopened` as metadata. Test with and without a filter. | Scott's "closed twice" heuristic is a signal, not a verdict. |
 | Evaluation | Bedrock Evaluations, retrieve-and-generate RAG job, **bring your own inference responses**. Reference response is the real MLC reply from the `full` variant. The pipeline sees only the `customer` variant. | A first-party job, not a hand-written harness. MLC can rerun it after the PoC to test a new prompt or a new Knowledge Base setup. |
 | Batch processing | Keep the interactive front end on on-demand `Converse`. Add a nightly Lambda or Step Functions job later: `Retrieve` per new ticket, then one Bedrock batch inference job for the drafts. | AgentCore Runtime has no batch-invoke operation, only synchronous invoke, streaming and one long-running async session. Batch inference halves the on-demand token price. See R18. |
-| Grounding | Bedrock Guardrail contextual grounding, `GROUNDING` and `RELEVANCE` filters, threshold 0.5 on both, action `BLOCK` | A human reviews every draft before it reaches a customer (R8), so the filter is a last-resort catch for a reply that ignores the retrieved tickets, not a strict gate. 0.5 is the AWS console default and blocks only responses AWS scores below even odds of being grounded or relevant. A threshold near 0.99 would block most drafts, including correct ones; a threshold near 0 would let hallucination through. |
+| Grounding | Bedrock Guardrail contextual grounding, `GROUNDING` and `RELEVANCE` filters, action `NONE`. The app applies the threshold from a sidebar slider (default 0.5) to the trace scores. | A Guardrail threshold is fixed per version, so a slider needs the check in the app. At `BLOCK` and 0.5 the Guardrail refused a valid how-to question, and the block message could not say why. Scores in the trace let the tester see the cause and tune the cut-off. A human reviews every draft (R8), so this is a flag, not a gate. |
+| Output format | Converse `outputConfig` with a JSON schema: `label` enum, `notes`, `reply`. Parsed with `json.loads`, no Pydantic. | The model cannot return a label outside the four values. Tool use was the alternative and was rejected: the Guardrail does not evaluate `toolUse.input`, so the reply would bypass PII masking. |
+| Off topic | One Guardrail, several policies: PII, denied topic, grounding. Denied topic is Classic tier. | `Converse` takes one Guardrail per call. Standard tier is more accurate but needs cross-region inference, which would send ticket text outside `eu-west-2`. |
 
 Add AgentCore only when Lumis calls the tool over HTTP, when the agent needs the
 Lumis API through a Gateway with permissions separate from a user token, when
@@ -309,7 +339,7 @@ you want AgentCore Evaluations, or for the retrieval loop in R17.
   never used.
 - `AgenticRetrieveStream` (R17 spike, `demo/agentic_reply.py`) is a no-go. It
   rejects a Guardrail with an `ANONYMIZE` action, so R3 cannot attach. It has
-  no system prompt, so it cannot emit the `Label:` line. Retrieval quality and
+  no system prompt and no output schema, so it cannot label the draft. Retrieval quality and
   latency matched `Retrieve` plus `Converse` on three questions.
 
 ### Evaluation (R10)

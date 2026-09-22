@@ -7,6 +7,7 @@
 Usage: uv run tests/test_draft_reply.py
 """
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -25,7 +26,9 @@ class Fake:
 
     def converse(self, **kw):
         calls["converse"] = kw
-        return {"output": {"message": {"content": [{"reasoningContent": {}}, {"text": "Label: howto\nNotes: Used [T1 Password reset email].\nReply:\nDo this."}]}}}
+        return {"stopReason": "end_turn", "output": {"message": {"content": [{"reasoningContent": {}}, {"text": '{"label": "howto", "notes": "Used [T1 Password reset email].", "reply": "Do this."}'}]}},
+                "trace": {"guardrail": {"outputAssessments": {"g": [{"contextualGroundingPolicy": {"filters": [
+                    {"type": "GROUNDING", "score": 0.9, "threshold": 0.5, "action": "NONE"}]}}]}}}}
 
 
 draft_reply.boto3.client = lambda name: Fake()
@@ -34,28 +37,28 @@ os.environ.update(KnowledgeBaseId="kb", SonnetModelArn="m", HaikuModelArn="h", G
 out = draft_reply.draft("q")
 assert calls["retrieve"]["retrievalConfiguration"]["managedSearchConfiguration"] == {
     "numberOfResults": 5, "filter": {"equals": {"key": "variant", "value": "full"}}}
-assert out == {"label": "howto", "notes": "Used [T1 Password reset email].", "draft": "Do this.",
+assert out == {"label": "howto", "notes": "Used [T1 Password reset email].", "draft": "Do this.", "blocked": False,
+               "grounding": {"GROUNDING": {"score": 0.9, "threshold": 0.5, "action": "NONE"}},
                "sources": [{"ticketId": "T1", "subject": "Password reset email", "tenant": "acme",
                             "variant": "full", "score": 0.7, "text": "# Password reset email\n\nold thread"}]}
-assert calls["converse"]["guardrailConfig"] == {"guardrailIdentifier": "g", "guardrailVersion": "1", "trace": "disabled"}
+assert calls["converse"]["guardrailConfig"] == {"guardrailIdentifier": "g", "guardrailVersion": "1", "trace": "enabled"}
+
+# A blocked draft is plain text, not JSON: it comes back whole with the scores that caused it.
+blocked = {"stopReason": "guardrail_intervened", "output": {"message": {"content": [{"text": "The response was blocked."}]}},
+           "trace": {"guardrail": {"outputAssessments": {"g": [{"contextualGroundingPolicy": {"filters": [
+               {"type": "GROUNDING", "score": 0.2, "threshold": 0.5, "action": "BLOCKED"}]}}]}}}}
+draft_reply.boto3.client = lambda name: type("F", (), {"converse": lambda self, **kw: blocked})()
+assert draft_reply.generate("q", []) == {"label": "unclear", "notes": "", "draft": "The response was blocked.", "blocked": True,
+                                         "grounding": {"GROUNDING": {"score": 0.2, "threshold": 0.5, "action": "BLOCKED"}}}
+draft_reply.boto3.client = lambda name: Fake()
+schema = json.loads(calls["converse"]["outputConfig"]["textFormat"]["structure"]["jsonSchema"]["schema"])
+assert set(schema["required"]) == {"label", "notes", "reply"} and schema["additionalProperties"] is False
 content = calls["converse"]["messages"][0]["content"]
 grounding = content[0]["guardContent"]["text"]
 query = content[1]["guardContent"]["text"]
 assert grounding["qualifiers"] == ["grounding_source"]
 assert "### Ticket T1 Password reset email (full, score 0.70)\n# Password reset email\n\nold thread" in grounding["text"]
 assert query == {"text": "## New ticket\n\nq", "qualifiers": ["query"]}
-
-# A reply that ignores the format still comes back whole, labelled unclear.
-empty = {"output": {"message": {"content": [{"reasoningContent": {}}]}}}
-draft_reply.boto3.client = lambda name: type("F", (), {"converse": lambda self, **kw: empty})()
-assert draft_reply.generate("q", []) == {"label": "unclear", "notes": "", "draft": ""}
-inline = {"output": {"message": {"content": [{"text": "Label: howto\nNotes: See [T9 Reply: bounced].\nReply:\nHi."}]}}}
-draft_reply.boto3.client = lambda name: type("F", (), {"converse": lambda self, **kw: inline})()
-assert draft_reply.generate("q", [])["draft"] == "Hi."
-loose = {"output": {"message": {"content": [{"text": "Hi,\nDo this.\n---\nLabel: bug"}]}}}
-draft_reply.boto3.client = lambda name: type("F", (), {"converse": lambda self, **kw: loose})()
-assert draft_reply.generate("q", []) == {"label": "bug", "notes": "", "draft": "Hi,\nDo this.\n---\nLabel: bug"}
-draft_reply.boto3.client = lambda name: Fake()
 
 # Metadata title wins over the "# subject" line in the document text.
 def retrieve_with_title(self, **kw):
