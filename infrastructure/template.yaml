@@ -112,9 +112,28 @@ Resources:
     Type: AWS::Bedrock::Guardrail
     Properties:
       Name: !Sub "${Prefix}-pii"
-      Description: Anonymise personal data in ticket text and in drafted replies.
-      BlockedInputMessaging: The request was blocked by the PII guardrail.
-      BlockedOutputsMessaging: The response was blocked by the PII guardrail.
+      Description: >-
+        Anonymise personal data, refuse questions that are not about My Learning
+        Cloud, and score how well the draft is grounded in the past tickets.
+      BlockedInputMessaging: >-
+        I can only help with questions about My Learning Cloud. I am not able to
+        answer this one.
+      BlockedOutputsMessaging: The draft was withheld by the guardrail.
+      TopicPolicyConfig:
+        TopicsConfig:
+          - Name: Off topic
+            Type: DENY
+            Definition: >-
+              Requests that are not about the My Learning Cloud (MLC) platform:
+              its courses, policies, reports, users, tenants, access or support.
+              Everyday tasks, general knowledge, and other software products.
+            Examples:
+              - How do I change a flat tyre?
+              - What is the capital of France?
+              - Write me a poem about the sea.
+            InputEnabled: true
+            InputAction: BLOCK
+            OutputEnabled: false
       SensitiveInformationPolicyConfig:
         PiiEntitiesConfig:
           - Type: NAME
@@ -131,16 +150,19 @@ Resources:
             Action: ANONYMIZE
       ContextualGroundingPolicyConfig:
         FiltersConfig:
+          # Scores only: the app applies its own threshold from the trace.
           - Type: GROUNDING
             Threshold: 0.5
+            Action: NONE
           - Type: RELEVANCE
             Threshold: 0.5
+            Action: NONE
 
   PiiGuardrailVersion:
     Type: AWS::Bedrock::GuardrailVersion
     Properties:
       GuardrailIdentifier: !GetAtt PiiGuardrail.GuardrailId
-      Description: v2 grounding
+      Description: v3 denied topic, grounding scores only
 
 Outputs:
   BucketName:
