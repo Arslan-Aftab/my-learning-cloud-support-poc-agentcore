@@ -27,7 +27,7 @@ new ticket ──► demo/draft_reply.py ──► Retrieve ──► Converse +
 | Region | `eu-west-2` London | UK or Ireland data residency. Every service below is available there. |
 | Retrieval | Bedrock **Managed** Knowledge Base, S3 connector | $5 per GB stored per month, $1 per 1,000 retrievals. Embedding model, reranker and hybrid search are included. Nothing to provision. The corpus is well under 1 GB. |
 | Document variants | Ingest each ticket twice: full thread and customer side only. Tag each file with `variant` metadata. Filter on `variant` at retrieval. | The customer text matches how a new ticket is phrased. The full thread adds the MLC answers, which may help or may add noise. One index compares both. |
-| Query API | `Retrieve` with `managedSearchConfiguration`, then one `Converse` call with the Guardrail attached | `RetrieveAndGenerate` is not supported for managed Knowledge Bases. Two calls, and the prompt is ours to control. `AgenticRetrieveStream` is the multi-step alternative, see R17. |
+| Query API | `Retrieve` with `managedSearchConfiguration`, then one `Converse` call with the Guardrail attached | `RetrieveAndGenerate` is not supported for managed Knowledge Bases. Two calls, and the prompt is ours to control. `AgenticRetrieveStream` was spiked as the multi-step alternative and rejected for now, see R17. |
 | Generation model | Claude Sonnet, `eu.` inference profile | Draft quality. The `eu.` profile keeps inference inside the EU. Try Haiku if cost matters. |
 | PII | Bedrock Guardrail, PII set to `ANONYMIZE` on model output only. The index holds the tickets as written. | The Knowledge Base stays faithful to the source. The draft reply is what leaves the tool, so redaction sits there. |
 | Runtime | Plain Bedrock API calls from Python. No AgentCore, no Strands, no Bedrock Agents. | The tool is a fixed pipeline with no tool loop, no session and no external caller. |
@@ -75,6 +75,16 @@ you want AgentCore Evaluations, or for the retrieval loop in R17.
   internal), `parentThread` (parent tenant) and sometimes `systemThread`. Sort by
   `timestamp`. Drop notes and system messages. The `howto` / `bug` type field was
   never used.
+- `AgenticRetrieveStream` (R17 spike, `demo/agentic_reply.py`) rejects our R3
+  Guardrail outright: `ValidationException: Guardrail with ANONYMIZE action is
+  not supported for AgenticRetrieveStream`. `BLOCK`-only guardrails are
+  supported; a guardrail with any `ANONYMIZE` PII action, ours included, is
+  not, so R3 cannot attach it. The API also has no system-prompt or
+  instruction field, only a `messages` list, so it cannot emit the `Label:`
+  line or the `tenant-data` signpost that the Converse prompt gives today.
+  Retrieval quality and cited ticket IDs matched `Retrieve` plus `Converse` on
+  the three test questions, and latency was similar (about 8 to 11 seconds
+  each way), with a single planning round each time on this 20 ticket sample.
 
 ### Evaluation (R10)
 
@@ -181,6 +191,7 @@ R10 evaluation job and compare price against quality.
 | `tests/` | Self-check for the ETL, with one fixture ticket |
 | `infrastructure/template.yaml` | CloudFormation: bucket, Knowledge Base role, Knowledge Base, data source, Guardrail. |
 | `demo/draft_reply.py` | Retrieve, Converse with the Guardrail, print the draft and the sources. |
+| `demo/agentic_reply.py` | R17 spike: `AgenticRetrieveStream`, no Guardrail (unsupported, see Findings), print the draft, sources and retrieval steps. |
 | `demo/app.py` | Local Streamlit page around the same pipeline. Paste a ticket, set tenant and variant, read the draft and the sources. |
 | `data/` | Local ticket export. Git ignores it. |
 | `out/` | ETL output. Git ignores it. |
@@ -431,7 +442,7 @@ The Note column holds the evidence and the test that produced it.
 | R14 | Handle customer-specific jargon | out | Revisit after evaluation. Tenant metadata filter is the first idea. |
 | R15 | Daily re-sync of new tickets | out | Manual re-run of ETL and sync job in the PoC. |
 | R16 | Ground-truth knowledge base or how-to wiki | out | Deferred at the deep dive. |
-| R17 | Agentic retrieval: plan the search, query again with new filters or terms until the sources are useful | open | Spike on `AgenticRetrieveStream`. It is built into managed Knowledge Bases, takes metadata filters per retriever, and streams a cited answer, so it may replace `Retrieve` plus `Converse`. Its Guardrail supports `BLOCK` only, not `MASK`, so R3 needs a separate `ApplyGuardrail` call on the answer. Compare draft quality and cost against the one-shot path. |
+| R17 | Agentic retrieval: plan the search, query again with new filters or terms until the sources are useful | out | Spiked `AgenticRetrieveStream` (`demo/agentic_reply.py`) against `Retrieve` plus `Converse` on three questions. No-go: it rejects the R3 Guardrail outright because it uses `ANONYMIZE`, and it has no system-prompt field, so it cannot emit the `Label:` line or the `tenant-data` signpost. Retrieval quality and latency were on par. Revisit only if a second, `BLOCK`-only guardrail is added for it and the missing label output is worked around. |
 | R18 | Batch processing to cut cost | partial | Design settled: on-demand front end, nightly batch job for new tickets. AgentCore Runtime has no batch mode. No batch job has run yet with our model ID, and the batch model table lists Sonnet 4.5, not Sonnet 5. See Findings. |
 | R19 | Ground every draft in the retrieved tickets and minimise hallucination | open | Research. First candidate: the Guardrail contextual grounding check, which scores grounding and relevance against the source chunks. Second: the LLM judge from R10. |
 | R20 | Detailed testing on the 20 ticket sample before the full corpus is loaded | implemented | T3 to T5 run on Sonnet 5 across all four classes and both variants on the 20 ticket sample (2026-09-22). See R3, R6, R7 for the findings. The full load can proceed. |
