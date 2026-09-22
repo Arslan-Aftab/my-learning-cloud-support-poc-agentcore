@@ -1,0 +1,151 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: MLC support agent PoC. Ticket bucket, managed Knowledge Base, S3 data source, PII Guardrail.
+
+Parameters:
+  Prefix:
+    Type: String
+    Default: mlc-support-poc
+    AllowedPattern: "^[a-z0-9-]{3,40}$"
+
+Resources:
+  TicketBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${Prefix}-tickets-${AWS::AccountId}"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled
+
+  KnowledgeBaseRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${Prefix}-kb-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: bedrock.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                aws:SourceArn: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/*"
+      Policies:
+        - PolicyName: read-ticket-bucket
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !GetAtt TicketBucket.Arn
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub "${TicketBucket.Arn}/*"
+
+  KnowledgeBase:
+    Type: AWS::Bedrock::KnowledgeBase
+    Properties:
+      Name: !Sub "${Prefix}-tickets"
+      Description: Escalated Lumis support tickets, one document per ticket, full and customer-only variants.
+      RoleArn: !GetAtt KnowledgeBaseRole.Arn
+      KnowledgeBaseConfiguration:
+        Type: MANAGED
+        ManagedKnowledgeBaseConfiguration:
+          EmbeddingModelType: MANAGED
+
+  TicketDataSource:
+    Type: AWS::Bedrock::DataSource
+    Properties:
+      KnowledgeBaseId: !Ref KnowledgeBase
+      Name: tickets
+      DataDeletionPolicy: DELETE
+      DataSourceConfiguration:
+        Type: MANAGED_KNOWLEDGE_BASE_CONNECTOR
+        ManagedKnowledgeBaseConnectorConfiguration:
+          ConnectorParameters:
+            type: S3
+            version: "1"
+            connectionConfiguration:
+              bucketName: !Ref TicketBucket
+              bucketOwnerAccountId: !Ref AWS::AccountId
+            filterConfiguration:
+              inclusionPrefixes:
+                - tickets/
+
+  IngestionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/vendedlogs/bedrock/${Prefix}-kb-ingestion"
+      RetentionInDays: 30
+
+  IngestionLogSource:
+    Type: AWS::Logs::DeliverySource
+    Properties:
+      Name: !Sub "${Prefix}-kb-ingestion"
+      LogType: APPLICATION_LOGS
+      ResourceArn: !GetAtt KnowledgeBase.KnowledgeBaseArn
+
+  IngestionLogDestination:
+    Type: AWS::Logs::DeliveryDestination
+    Properties:
+      Name: !Sub "${Prefix}-kb-ingestion"
+      DestinationResourceArn: !GetAtt IngestionLogGroup.Arn
+      OutputFormat: json
+
+  IngestionLogDelivery:
+    Type: AWS::Logs::Delivery
+    Properties:
+      DeliverySourceName: !Ref IngestionLogSource
+      DeliveryDestinationArn: !GetAtt IngestionLogDestination.Arn
+
+  PiiGuardrail:
+    Type: AWS::Bedrock::Guardrail
+    Properties:
+      Name: !Sub "${Prefix}-pii"
+      Description: Anonymise personal data in ticket text and in drafted replies.
+      BlockedInputMessaging: The request was blocked by the PII guardrail.
+      BlockedOutputsMessaging: The response was blocked by the PII guardrail.
+      SensitiveInformationPolicyConfig:
+        PiiEntitiesConfig:
+          - Type: NAME
+            Action: ANONYMIZE
+          - Type: EMAIL
+            Action: ANONYMIZE
+          - Type: PHONE
+            Action: ANONYMIZE
+          - Type: ADDRESS
+            Action: ANONYMIZE
+          - Type: UK_NATIONAL_INSURANCE_NUMBER
+            Action: ANONYMIZE
+          - Type: PASSWORD
+            Action: ANONYMIZE
+
+  PiiGuardrailVersion:
+    Type: AWS::Bedrock::GuardrailVersion
+    Properties:
+      GuardrailIdentifier: !GetAtt PiiGuardrail.GuardrailId
+      Description: v1
+
+Outputs:
+  BucketName:
+    Value: !Ref TicketBucket
+  KnowledgeBaseId:
+    Value: !Ref KnowledgeBase
+  DataSourceId:
+    Value: !GetAtt TicketDataSource.DataSourceId
+  IngestionLogGroup:
+    Value: !Ref IngestionLogGroup
+  GuardrailId:
+    Value: !GetAtt PiiGuardrail.GuardrailId
+  GuardrailVersion:
+    Value: !GetAtt PiiGuardrailVersion.Version
