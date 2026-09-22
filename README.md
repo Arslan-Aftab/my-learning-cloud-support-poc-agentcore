@@ -138,58 +138,40 @@ judge prompt, called directly instead of through a Bedrock evaluation job.
 
 ### R18: batch processing
 
-- Batch inference supports both generation models by cross-Region inference
-  profile in `eu-west-2`: `anthropic.claude-sonnet-4-5-20250929-v1:0` and
-  `anthropic.claude-haiku-4-5-20251001-v1:0`. Check the live [batch inference
-  support table](https://docs.aws.amazon.com/bedrock/latest/userguide/batch-inference-supported.html)
-  for the exact model ID the stack calls; "Claude Sonnet 5" is not a listed
-  model ID, so confirm the real ID in use before this carries over.
-  Batch inference is not supported for provisioned models, and it does not
-  support tool calling or structured output
-  ([Process multiple prompts with batch inference](https://docs.aws.amazon.com/bedrock/latest/userguide/batch-inference.html)).
-- Input is one or more `.jsonl` files, one JSON object per line with
-  `recordId` and `modelInput`. `modelInput` matches either the `InvokeModel`
-  body (default) or the `Converse` request body, set per job
-  ([Format and upload your batch inference data](https://docs.aws.amazon.com/bedrock/latest/userguide/batch-inference-data.html)).
-  Record-count and file-size minimums and maximums are account quotas, not
-  fixed numbers in the guide; check
-  [Amazon Bedrock service quotas](https://docs.aws.amazon.com/general/latest/gr/bedrock.html#limits_bedrock)
-  before sizing a job. Default limits list is: maximum input file size 1 GB,
-  maximum job size 5 GB.
-- Batch inference is 50% of on-demand price, confirmed on the
-  [Bedrock pricing page](https://aws.amazon.com/bedrock/pricing/). Get the
-  exact eu-west-2 rate for the model ID in use from the console at job time;
-  the public page does not render a fixed London table.
-- No fixed turnaround SLA. A job carries an optional `timeoutDurationInHours`
-  and AWS documents no completion guarantee
-  ([Create a batch inference job](https://docs.aws.amazon.com/bedrock/latest/userguide/batch-inference-create.html)).
-  Plan for same-day completion, not real time.
-- The claim "AgentCore agents do not support batching" is **true**. AgentCore
-  Runtime offers synchronous invoke and streaming, plus one async pattern:
-  a single long-running session that reports `HealthyBusy` on `/ping` so it
-  survives past the 15-minute idle timeout
-  ([Handle asynchronous and long running agents](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-long-run.html)).
-  That is one request processing in the background, not a job over many
-  records. There is no batch-invoke operation in the Runtime API
-  ([Invoke an AgentCore Runtime agent](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-invoke-agent.html)).
-  The alternative for a nightly run: a Lambda or Step Functions job that
-  calls `Retrieve` per ticket, then submits one Bedrock batch inference job
-  for all the drafts.
-- Fit for this PoC: the interactive front end (`demo/app.py`) needs an answer
-  per click, so it stays on-demand `Converse`. A nightly job over the day's
-  new tickets can use batch, since nobody waits on it. Rough cost for 200
-  tickets a day, at roughly 3,000 input and 500 output tokens per draft
-  (ticket text, retrieved context and the reply):
-  - On-demand: 200 × (3,000 × on-demand input rate + 500 × on-demand output
-    rate).
-  - Batch: the same at 50% of both rates
-    ([Bedrock pricing](https://aws.amazon.com/bedrock/pricing/)).
-  - At published Claude Sonnet on-demand rates of roughly $3 per million
-    input tokens and $15 per million output tokens, 200 tickets a day costs
-    about $1.80/day on-demand and about $0.90/day on batch — call it $54 a
-    month against $27 a month. Confirm the exact rate for the model ID and
-    region in use in the console; this is the ratio that holds regardless
-    (batch always halves the on-demand line), not a quoted invoice.
+**AgentCore Runtime cannot run in batch.** It offers only synchronous invoke,
+streaming, and one long-running async session per request
+([Handle asynchronous and long running agents](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-long-run.html)).
+
+| | Invocation batch | Agentic |
+| --- | --- | --- |
+| Steps | Fixed: `Retrieve` per ticket, then one Bedrock batch inference job for all the drafts | The model plans its own retrieval steps per ticket, on AgentCore Runtime or Lambda |
+| Model call | Bedrock batch inference, `InvokeModel` or `Converse` body per JSONL record ([Format and upload your batch inference data](https://docs.aws.amazon.com/bedrock/latest/userguide/batch-inference-data.html)) | On-demand `Converse`, no batch mode |
+| Price | 50% of on-demand, both generation models by cross-Region inference profile in `eu-west-2`: `anthropic.claude-sonnet-4-5-20250929-v1:0` and `anthropic.claude-haiku-4-5-20251001-v1:0` ([batch inference support table](https://docs.aws.amazon.com/bedrock/latest/userguide/batch-inference-supported.html), [pricing](https://aws.amazon.com/bedrock/pricing/)) | Full on-demand price |
+| Latency | Hours. No fixed SLA; a job carries an optional `timeoutDurationInHours` ([Create a batch inference job](https://docs.aws.amazon.com/bedrock/latest/userguide/batch-inference-create.html)). Fits a nightly run | Minutes |
+
+An agentic loop can be unrolled into N batch jobs (plan job, on-demand
+`Retrieve`, draft job), but every ticket then takes the same fixed steps, so
+it loses the per-ticket adaptivity that makes it agentic.
+
+Batch inference is not supported for provisioned models, and it does not
+support tool calling or structured output
+([Process multiple prompts with batch inference](https://docs.aws.amazon.com/bedrock/latest/userguide/batch-inference.html)).
+Record-count and file-size minimums and maximums are account quotas, not
+fixed numbers in the guide; check
+[Amazon Bedrock service quotas](https://docs.aws.amazon.com/general/latest/gr/bedrock.html#limits_bedrock)
+before sizing a job.
+
+Fit for this PoC: the interactive front end (`demo/app.py`) needs an answer
+per click, so it stays agentic on-demand. A nightly job over the day's new
+tickets can use invocation batch, since nobody waits on it. Rough cost for
+200 tickets a day, at roughly 3,000 input and 500 output tokens per draft:
+about $1.80/day on-demand against about $0.90/day on batch, at published
+Claude Sonnet rates of $3 per million input tokens and $15 per million output
+tokens. Confirm the exact rate for the model ID and region in use in the
+console; the ratio holds regardless.
+
+The customer can run both approaches on the same held-out set through the
+R10 evaluation job and compare price against quality.
 
 ## Repo layout
 
@@ -450,6 +432,6 @@ The Note column holds the evidence and the test that produced it.
 | R15 | Daily re-sync of new tickets | out | Manual re-run of ETL and sync job in the PoC. |
 | R16 | Ground-truth knowledge base or how-to wiki | out | Deferred at the deep dive. |
 | R17 | Agentic retrieval: plan the search, query again with new filters or terms until the sources are useful | open | Spike on `AgenticRetrieveStream`. It is built into managed Knowledge Bases, takes metadata filters per retriever, and streams a cited answer, so it may replace `Retrieve` plus `Converse`. Its Guardrail supports `BLOCK` only, not `MASK`, so R3 needs a separate `ApplyGuardrail` call on the answer. Compare draft quality and cost against the one-shot path. |
-| R18 | Batch processing to cut cost | validated | Bedrock batch inference supports the Sonnet and Haiku generation models in `eu-west-2` by cross-Region inference profile, at 50% of on-demand price. AgentCore Runtime has no batch mode. Design: on-demand front end, nightly batch job for new tickets. See Findings. |
+| R18 | Batch processing to cut cost | partial | Design settled: on-demand front end, nightly batch job for new tickets. AgentCore Runtime has no batch mode. No batch job has run yet with our model ID, and the batch model table lists Sonnet 4.5, not Sonnet 5. See Findings. |
 | R19 | Ground every draft in the retrieved tickets and minimise hallucination | open | Research. First candidate: the Guardrail contextual grounding check, which scores grounding and relevance against the source chunks. Second: the LLM judge from R10. |
 | R20 | Detailed testing on the 20 ticket sample before the full corpus is loaded | implemented | T3 to T5 run on Sonnet 5 across all four classes and both variants on the 20 ticket sample (2026-09-22). See R3, R6, R7 for the findings. The full load can proceed. |
