@@ -57,9 +57,14 @@ if st.button("Draft reply", type="primary") and question.strip():
 
 if out := st.session_state.get("out"):
     st.subheader(f"Label: {out['label']}")
-    text = st.text_area("Draft reply (edit before you copy)", out["draft"], height=300)
+    if out["notes"]:
+        st.info(out["notes"])
+    text = st.text_area("Reply to the customer (edit before you copy)", out["draft"], height=300)
+    # ponytail: JSON in a script tag, not an attribute, so quotes in the reply survive.
     st.iframe(
-        f"<button onclick='navigator.clipboard.writeText({json.dumps(text)})'>Copy reply</button>", height=40
+        f"<script>const reply = {json.dumps(text).replace('<', '\\u003c')};</script>"
+        '<button onclick="navigator.clipboard.writeText(reply)">Copy reply</button>',
+        height=40,
     )
     st.subheader("Past tickets used")
     for s in out["sources"]:

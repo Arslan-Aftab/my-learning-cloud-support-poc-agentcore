@@ -13,16 +13,22 @@ Guardrail on the output. Nothing is sent to a customer.
 """
 
 import os
+import re
 import sys
 
 import boto3
 
 SYSTEM = """You are a support agent for My Learning Cloud (MLC). Draft a reply to
 the new ticket for a human agent to review. Use only the past tickets given.
-Start with one line `Label: <howto|tenant-data|bug|unclear>`. For tenant-data,
-name the screen to check and the data to request from the customer. Cite each
-past ticket you used as [ticketId subject], copying the ID and subject exactly
-as given in its heading, for example [K2QNN Password reset email]."""
+Answer in exactly this format, with these three headings and nothing else:
+
+Label: <howto|tenant-data|bug|unclear>
+Notes: <one short paragraph for the agent. Cite each past ticket you used as
+[ticketId subject], copying the ID and subject exactly as given in its heading,
+for example [K2QNN Password reset email]. For tenant-data, name the screen to
+check and the data to request from the customer.>
+Reply:
+<the reply to the customer only, no label, no notes, no citations>"""
 
 
 def subject_of(text, metadata):
@@ -84,11 +90,15 @@ def generate(question, sources, model="Sonnet"):
         },
     )["output"]["message"]["content"]
     # Sonnet 5 emits a reasoningContent block before the text.
-    reply = next(b["text"] for b in content if "text" in b).strip()
-    first, _, rest = reply.partition("\n")
-    label = first.removeprefix("Label:").strip().lower() if first.startswith("Label:") else "unclear"
-    return {"label": label, "draft": rest.strip() if first.startswith("Label:") else reply}
-
+    text = next(b["text"] for b in content if "text" in b)
+    label = re.search(r"^Label:\s*(.+)$", text, re.M)
+    notes = re.search(r"^Notes:\s*(.*?)(?=^Reply:|\Z)", text, re.M | re.S)
+    reply = text.partition("Reply:")[2] if "Reply:" in text else text
+    return {
+        "label": label.group(1).strip().lower() if label else "unclear",
+        "notes": notes.group(1).strip() if notes else "",
+        "draft": reply.strip(),
+    }
 
 def draft(question, tenant=None, variant="full", n=5, model="Sonnet"):
     sources = retrieve(question, tenant, variant, n)
@@ -97,6 +107,6 @@ def draft(question, tenant=None, variant="full", n=5, model="Sonnet"):
 
 if __name__ == "__main__":
     out = draft(" ".join(sys.argv[1:]))
-    print(f"Label: {out['label']}\n\n{out['draft']}\n\nSources:")
+    print(f"Label: {out['label']}\nNotes: {out['notes']}\n\n{out['draft']}\n\nSources:")
     for s in out["sources"]:
         print(f"{s['ticketId']}  {s['subject']}  {s['tenant']}  {s['score']:.2f}")
