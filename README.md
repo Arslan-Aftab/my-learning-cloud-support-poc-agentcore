@@ -25,14 +25,14 @@ new ticket ──► demo/draft_reply.py ──► Retrieve ──► Converse +
 | --- | --- | --- |
 | Region | `eu-west-2` London | UK or Ireland data residency. Every service below is available there. |
 | Retrieval | Bedrock **Managed** Knowledge Base, S3 connector | $5 per GB stored per month, $1 per 1,000 retrievals. Embedding model, reranker and hybrid search are included. Nothing to provision. The corpus is well under 1 GB. |
-| Chunking experiment | Ingest each ticket twice: full thread and customer side only. Tag each file with `variant` metadata. Filter on `variant` at retrieval. | Compares both strategies against one index. Fall back to two Knowledge Bases if the filter is awkward. |
-| Query API | `Retrieve` with `managedSearchConfiguration`, then one `Converse` call with the Guardrail attached | `RetrieveAndGenerate` is not supported for managed Knowledge Bases. Two calls, and the prompt is ours to control. |
+| Document variants | Ingest each ticket twice: full thread and customer side only. Tag each file with `variant` metadata. Filter on `variant` at retrieval. | The customer text matches how a new ticket is phrased. The full thread adds the MLC answers, which may help or may add noise. One index compares both. |
+| Query API | `Retrieve` with `managedSearchConfiguration`, then one `Converse` call with the Guardrail attached | `RetrieveAndGenerate` is not supported for managed Knowledge Bases. Two calls, and the prompt is ours to control. `AgenticRetrieveStream` is the multi-step alternative, see R17. |
 | Generation model | Claude Sonnet, `eu.` inference profile | Draft quality. The `eu.` profile keeps inference inside the EU. Try Haiku if cost matters. |
 | PII | Bedrock Guardrail, PII set to `ANONYMIZE` on model output only. The index holds the tickets as written. | The Knowledge Base stays faithful to the source. The draft reply is what leaves the tool, so redaction sits there. |
 | Runtime | Plain Bedrock API calls from Python. No AgentCore, no Strands, no Bedrock Agents. | The tool is a fixed pipeline with no tool loop, no session and no external caller. |
 | Infrastructure | One CloudFormation template, `infrastructure/template.yaml` | Five resources. `AWS::Bedrock::KnowledgeBase` supports `ManagedKnowledgeBaseConfiguration`. |
 | Output | Text in the console. No write-back to Lumis. | Kick-off decision. |
-| Corpus scope | Escalated tickets only, including tickets assigned to developers | Kick-off decision. |
+| Corpus scope | Escalated tickets only, including tickets assigned to developers. Up to 200 tickets from three tenants in the PoC, not all 6,950. | Kick-off decision on escalation. Thousands of tickets add index bloat that no test refers to. |
 | Document format | One Markdown file per ticket. Structured fields go in the `.metadata.json` sidecar. | The S3 connector accepts `.txt`, `.md`, `.html`, `.docx`, `.csv`, `.xlsx` and `.pdf`. It does not accept `.json` as a document. Markdown gives the embedding model prose without keys and braces. |
 | Bad tickets | Keep all. Store `reopened` as metadata. Test with and without a filter. | Scott's "closed twice" heuristic is a signal, not a verdict. |
 
@@ -155,12 +155,19 @@ line sets the profile and the region, so no command below needs a flag.
 ## Loading tickets
 
 Repeat when the export changes. Load a small sample first, check the
-ingestion result and one retrieval, then drop `--limit` and load everything.
+ingestion result and one retrieval, then load the three tenants.
 
 1. Split the export:
 
    ```shell
    uv run etl/split_tickets.py data/super-admin.tickets.json out/ --limit 20
+   ```
+
+   For the three tenant corpus, filter by tenant. `--limit` caps the total:
+
+   ```shell
+   uv run etl/split_tickets.py data/super-admin.tickets.json out/ \
+     --tenants spf,optalis,stjudescare --limit 200
    ```
 
 2. Upload. `--delete` removes files that are no longer in `out/`, which
