@@ -7,6 +7,7 @@
 Usage: uv run tests/test_draft_reply.py
 """
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -25,7 +26,7 @@ class Fake:
 
     def converse(self, **kw):
         calls["converse"] = kw
-        return {"output": {"message": {"content": [{"reasoningContent": {}}, {"text": "Label: howto\nNotes: Used [T1 Password reset email].\nReply:\nDo this."}]}}}
+        return {"output": {"message": {"content": [{"reasoningContent": {}}, {"text": '{"label": "howto", "notes": "Used [T1 Password reset email].", "reply": "Do this."}'}]}}}
 
 
 draft_reply.boto3.client = lambda name: Fake()
@@ -38,24 +39,14 @@ assert out == {"label": "howto", "notes": "Used [T1 Password reset email].", "dr
                "sources": [{"ticketId": "T1", "subject": "Password reset email", "tenant": "acme",
                             "variant": "full", "score": 0.7, "text": "# Password reset email\n\nold thread"}]}
 assert calls["converse"]["guardrailConfig"] == {"guardrailIdentifier": "g", "guardrailVersion": "1", "trace": "disabled"}
+schema = json.loads(calls["converse"]["outputConfig"]["textFormat"]["structure"]["jsonSchema"]["schema"])
+assert set(schema["required"]) == {"label", "notes", "reply"} and schema["additionalProperties"] is False
 content = calls["converse"]["messages"][0]["content"]
 grounding = content[0]["guardContent"]["text"]
 query = content[1]["guardContent"]["text"]
 assert grounding["qualifiers"] == ["grounding_source"]
 assert "### Ticket T1 Password reset email (full, score 0.70)\n# Password reset email\n\nold thread" in grounding["text"]
 assert query == {"text": "## New ticket\n\nq", "qualifiers": ["query"]}
-
-# A reply that ignores the format still comes back whole, labelled unclear.
-empty = {"output": {"message": {"content": [{"reasoningContent": {}}]}}}
-draft_reply.boto3.client = lambda name: type("F", (), {"converse": lambda self, **kw: empty})()
-assert draft_reply.generate("q", []) == {"label": "unclear", "notes": "", "draft": ""}
-inline = {"output": {"message": {"content": [{"text": "Label: howto\nNotes: See [T9 Reply: bounced].\nReply:\nHi."}]}}}
-draft_reply.boto3.client = lambda name: type("F", (), {"converse": lambda self, **kw: inline})()
-assert draft_reply.generate("q", [])["draft"] == "Hi."
-loose = {"output": {"message": {"content": [{"text": "Hi,\nDo this.\n---\nLabel: bug"}]}}}
-draft_reply.boto3.client = lambda name: type("F", (), {"converse": lambda self, **kw: loose})()
-assert draft_reply.generate("q", []) == {"label": "bug", "notes": "", "draft": "Hi,\nDo this.\n---\nLabel: bug"}
-draft_reply.boto3.client = lambda name: Fake()
 
 # Metadata title wins over the "# subject" line in the document text.
 def retrieve_with_title(self, **kw):

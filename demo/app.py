@@ -56,7 +56,7 @@ if st.button("Draft reply", type="primary") and question.strip():
         st.session_state["out"] = {**out, "sources": sources}
 
 if out := st.session_state.get("out"):
-    st.subheader(f"Label: {out['label']}")
+    st.subheader(f"Query type: {out['label']}")
     if out["notes"]:
         st.info(out["notes"])
     text = st.text_area("Reply to the customer (edit before you copy)", out["draft"], height=300)

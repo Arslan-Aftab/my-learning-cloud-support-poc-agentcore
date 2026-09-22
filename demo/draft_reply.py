@@ -8,27 +8,34 @@ Usage: uv run demo/draft_reply.py "How do I view completion of a policy?"
 
 Reads KnowledgeBaseId, SonnetModelArn, HaikuModelArn, GuardrailId and
 GuardrailVersion from the environment (`set -a; source .env; set +a`). Retrieves similar tickets from the
-managed Knowledge Base, then asks the model for a labelled draft with the PII
-Guardrail on the output. Nothing is sent to a customer.
+managed Knowledge Base, then asks the model for a labelled draft as schema-bound
+JSON with the PII Guardrail on the output. Nothing is sent to a customer.
 """
 
+import json
 import os
-import re
 import sys
 
 import boto3
 
 SYSTEM = """You are a support agent for My Learning Cloud (MLC). Draft a reply to
 the new ticket for a human agent to review. Use only the past tickets given.
-Answer in exactly this format, with these three headings and nothing else:
+In notes, cite each past ticket you used as [ticketId subject], copying the ID
+and subject exactly as given in its heading, for example [K2QNN Password reset
+email]. For tenant-data, name the screen to check and the data to request from
+the customer. The reply is for the customer only: no label, no notes, no
+citations."""
 
-Label: <howto|tenant-data|bug|unclear>
-Notes: <one short paragraph for the agent. Cite each past ticket you used as
-[ticketId subject], copying the ID and subject exactly as given in its heading,
-for example [K2QNN Password reset email]. For tenant-data, name the screen to
-check and the data to request from the customer.>
-Reply:
-<the reply to the customer only, no label, no notes, no citations>"""
+OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "label": {"type": "string", "enum": ["howto", "tenant-data", "bug", "unclear"]},
+        "notes": {"type": "string", "description": "One short paragraph for the human agent, with citations."},
+        "reply": {"type": "string", "description": "The reply to the customer."},
+    },
+    "required": ["label", "notes", "reply"],
+    "additionalProperties": False,
+}
 
 
 def subject_of(text, metadata):
@@ -89,17 +96,12 @@ def generate(question, sources, model="Sonnet"):
             "guardrailVersion": env["GuardrailVersion"],
             "trace": "disabled",
         },
+        outputConfig={"textFormat": {"type": "json_schema", "structure": {"jsonSchema": {
+            "name": "draft", "schema": json.dumps(OUTPUT_SCHEMA)}}}},
     )["output"]["message"]["content"]
     # Sonnet 5 emits a reasoningContent block before the text.
-    text = next((b["text"] for b in content if "text" in b), "")
-    label = re.search(r"^Label:\s*(.+)$", text, re.M)
-    notes = re.search(r"^Notes:\s*(.*?)(?=^Reply:|\Z)", text, re.M | re.S)
-    reply = re.split(r"^Reply:", text, maxsplit=1, flags=re.M)[-1]
-    return {
-        "label": label.group(1).strip().lower() if label else "unclear",
-        "notes": notes.group(1).strip() if notes else "",
-        "draft": reply.strip(),
-    }
+    out = json.loads(next(b["text"] for b in content if "text" in b))
+    return {"label": out["label"], "notes": out["notes"], "draft": out["reply"]}
 
 def draft(question, tenant=None, variant="full", n=5, model="Sonnet"):
     sources = retrieve(question, tenant, variant, n)
