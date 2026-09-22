@@ -46,13 +46,13 @@ Once per machine.
 
 - The ticket export. Download `super-admin.tickets.json` from the project
   Drive folder to `data/`. The password is in the Teams chat. Never commit it.
+- Model access. The first Bedrock call to Claude Sonnet 5 from a new account
+  fails with `AccessDeniedException: Your account is currently being
+  verified`. No action is needed. AWS verifies the account and emails when
+  the Marketplace subscription is active, within a few hours. Until then,
+  pick Haiku in the page, or pass `model="Haiku"` to `draft()`.
 
 Sign in before each session: `aws sso login --profile mlc-support-poc`.
-
-> **Note** A new AWS account cannot call Claude Sonnet 5 until AWS has
-> verified it, which takes a few hours. The call fails with
-> `AccessDeniedException: Your account is currently being verified`. Until it
-> clears, pick Haiku in the page, or pass `model="Haiku"` to `draft()`.
 
 ### Deploying
 
