@@ -129,12 +129,18 @@ Resources:
             Action: ANONYMIZE
           - Type: PASSWORD
             Action: ANONYMIZE
+      ContextualGroundingPolicyConfig:
+        FiltersConfig:
+          - Type: GROUNDING
+            Threshold: 0.5
+          - Type: RELEVANCE
+            Threshold: 0.5
 
   PiiGuardrailVersion:
     Type: AWS::Bedrock::GuardrailVersion
     Properties:
       GuardrailIdentifier: !GetAtt PiiGuardrail.GuardrailId
-      Description: v1
+      Description: v2 grounding
 
 Outputs:
   BucketName:
