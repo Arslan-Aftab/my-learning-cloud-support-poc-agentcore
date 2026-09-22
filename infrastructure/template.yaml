@@ -140,7 +140,7 @@ Resources:
     Type: AWS::Bedrock::GuardrailVersion
     Properties:
       GuardrailIdentifier: !GetAtt PiiGuardrail.GuardrailId
-      Description: v1
+      Description: v2 grounding
 
 Outputs:
   BucketName:

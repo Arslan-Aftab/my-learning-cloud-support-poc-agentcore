@@ -56,6 +56,7 @@ def retrieve(question, tenant=None, variant="full", n=5):
         ticket_id = r["metadata"].get("ticketId", "?")
         text = r["content"]["text"]
         if ticket_id in by_ticket:
+            # ponytail: chunks join in score order; Retrieve gives no offset to sort on.
             by_ticket[ticket_id]["text"] += "\n\n" + text
             continue
         by_ticket[ticket_id] = {
@@ -90,10 +91,10 @@ def generate(question, sources, model="Sonnet"):
         },
     )["output"]["message"]["content"]
     # Sonnet 5 emits a reasoningContent block before the text.
-    text = next(b["text"] for b in content if "text" in b)
+    text = next((b["text"] for b in content if "text" in b), "")
     label = re.search(r"^Label:\s*(.+)$", text, re.M)
     notes = re.search(r"^Notes:\s*(.*?)(?=^Reply:|\Z)", text, re.M | re.S)
-    reply = text.partition("Reply:")[2] if "Reply:" in text else text
+    reply = re.split(r"^Reply:", text, maxsplit=1, flags=re.M)[-1]
     return {
         "label": label.group(1).strip().lower() if label else "unclear",
         "notes": notes.group(1).strip() if notes else "",

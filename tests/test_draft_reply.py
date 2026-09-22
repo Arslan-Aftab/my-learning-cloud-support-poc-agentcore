@@ -46,6 +46,12 @@ assert "### Ticket T1 Password reset email (full, score 0.70)\n# Password reset 
 assert query == {"text": "## New ticket\n\nq", "qualifiers": ["query"]}
 
 # A reply that ignores the format still comes back whole, labelled unclear.
+empty = {"output": {"message": {"content": [{"reasoningContent": {}}]}}}
+draft_reply.boto3.client = lambda name: type("F", (), {"converse": lambda self, **kw: empty})()
+assert draft_reply.generate("q", []) == {"label": "unclear", "notes": "", "draft": ""}
+inline = {"output": {"message": {"content": [{"text": "Label: howto\nNotes: See [T9 Reply: bounced].\nReply:\nHi."}]}}}
+draft_reply.boto3.client = lambda name: type("F", (), {"converse": lambda self, **kw: inline})()
+assert draft_reply.generate("q", [])["draft"] == "Hi."
 loose = {"output": {"message": {"content": [{"text": "Hi,\nDo this.\n---\nLabel: bug"}]}}}
 draft_reply.boto3.client = lambda name: type("F", (), {"converse": lambda self, **kw: loose})()
 assert draft_reply.generate("q", []) == {"label": "bug", "notes": "", "draft": "Hi,\nDo this.\n---\nLabel: bug"}
