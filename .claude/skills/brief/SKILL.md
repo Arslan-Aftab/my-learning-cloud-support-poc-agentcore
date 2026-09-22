@@ -16,7 +16,9 @@ this order:
 - **Context**: what already works and what does not, from the README and the
   handoff. Three to six bullets. Link files, do not paste them.
 - **Constraints**: PII rules, AWS profile rules, `uv run`, PR target branch.
-- **Report back**: open a PR with the repo template, comment on the Jira
-  ticket, update the requirements table in `README.md`.
+- **Report back**: open a PR with the repo template and comment on the Jira
+  ticket. Research and findings go in `docs/<topic>.md`, one file per task,
+  not in `README.md`. Do not edit the README requirements table; give the
+  evidence in the PR and the PM chat writes the row after merge.
 
 End with the command to start the chat: `claude --worktree <branch>`.
