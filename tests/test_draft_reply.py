@@ -51,8 +51,12 @@ draft_reply.boto3.client = lambda name: type("F", (), {"converse": lambda self, 
 assert draft_reply.generate("q", []) == {"label": "unclear", "notes": "", "draft": "The response was blocked.", "blocked": True,
                                          "grounding": {"GROUNDING": {"score": 0.2, "threshold": 0.5, "action": "BLOCKED"}}}
 draft_reply.boto3.client = lambda name: Fake()
-schema = json.loads(calls["converse"]["outputConfig"]["textFormat"]["structure"]["jsonSchema"]["schema"])
-assert set(schema["required"]) == {"label", "notes", "reply"} and schema["additionalProperties"] is False
+# Sonnet has no structured output on Bedrock: schema goes in the prompt, and a non-JSON reply comes back whole.
+assert "outputConfig" not in calls["converse"] and '"enum"' in calls["converse"]["system"][0]["text"]
+prose = {"stopReason": "end_turn", "output": {"message": {"content": [{"text": "Hi,\nDo this."}]}}}
+draft_reply.boto3.client = lambda name: type("F", (), {"converse": lambda self, **kw: prose})()
+assert draft_reply.generate("q", [])["draft"] == "Hi,\nDo this."
+draft_reply.boto3.client = lambda name: Fake()
 content = calls["converse"]["messages"][0]["content"]
 grounding = content[0]["guardContent"]["text"]
 query = content[1]["guardContent"]["text"]
@@ -76,6 +80,8 @@ draft_reply.draft("q", tenant="acme", variant="customer", n=2, model="Haiku")
 assert calls["retrieve"]["retrievalConfiguration"]["managedSearchConfiguration"]["filter"] == {"andAll": [
     {"equals": {"key": "variant", "value": "customer"}}, {"equals": {"key": "tenant", "value": "acme"}}]}
 assert calls["converse"]["modelId"] == "h"
+schema = json.loads(calls["converse"]["outputConfig"]["textFormat"]["structure"]["jsonSchema"]["schema"])
+assert set(schema["required"]) == {"label", "notes", "reply"} and schema["additionalProperties"] is False
 
 # Chunks of one ticket are grouped into one source, first (best) score kept.
 def retrieve_chunks(self, **kw):

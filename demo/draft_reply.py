@@ -26,6 +26,8 @@ email]. For tenant-data, name the screen to check and the data to request from
 the customer. The reply is for the customer only: no label, no notes, no
 citations."""
 
+STRUCTURED_OUTPUT_MODELS = {"Haiku"}
+
 OUTPUT_SCHEMA = {
     "type": "object",
     "properties": {
@@ -84,9 +86,13 @@ def generate(question, sources, model="Sonnet"):
         f"### Ticket {s['ticketId']} {s['subject']} ({s['variant']}, score {s['score']:.2f})\n{s['text']}"
         for s in sources
     )
+    # Bedrock structured outputs: supported on Haiku 4.5, not on Sonnet 5 (model cards, 2026-09-22).
+    # Sonnet gets the schema in the prompt instead, so its JSON is a request, not a guarantee.
+    structured = model in STRUCTURED_OUTPUT_MODELS
+    system = SYSTEM if structured else SYSTEM + "\nAnswer with one JSON object matching this schema and nothing else:\n" + json.dumps(OUTPUT_SCHEMA)
     response = boto3.client("bedrock-runtime").converse(
         modelId=env[f"{model}ModelArn"],
-        system=[{"text": SYSTEM}],
+        system=[{"text": system}],
         messages=[{"role": "user", "content": [
             {"guardContent": {"text": {"text": f"## Past tickets\n\n{context}", "qualifiers": ["grounding_source"]}}},
             {"guardContent": {"text": {"text": f"## New ticket\n\n{question}", "qualifiers": ["query"]}}},
@@ -96,15 +102,19 @@ def generate(question, sources, model="Sonnet"):
             "guardrailVersion": env["GuardrailVersion"],
             "trace": "enabled",
         },
-        outputConfig={"textFormat": {"type": "json_schema", "structure": {"jsonSchema": {
-            "name": "draft", "schema": json.dumps(OUTPUT_SCHEMA)}}}},
+        **({"outputConfig": {"textFormat": {"type": "json_schema", "structure": {"jsonSchema": {
+            "name": "draft", "schema": json.dumps(OUTPUT_SCHEMA)}}}}} if structured else {}),
     )
     grounding = grounding_scores(response.get("trace", {}))
     # Sonnet 5 emits a reasoningContent block before the text.
     text = next(b["text"] for b in response["output"]["message"]["content"] if "text" in b)
     if response["stopReason"] == "guardrail_intervened":
         return {"label": "unclear", "notes": "", "draft": text, "blocked": True, "grounding": grounding}
-    out = json.loads(text)
+    try:
+        out = json.loads(text.strip().removeprefix("```json").removesuffix("```"))
+    except ValueError:
+        # Prompted JSON can fail; show the raw text rather than nothing.
+        out = {"label": "unclear", "notes": "", "reply": text}
     return {"label": out["label"], "notes": out["notes"], "draft": out["reply"], "blocked": False, "grounding": grounding}
 
 
