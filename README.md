@@ -37,6 +37,7 @@ new ticket ──► demo/draft_reply.py ──► Retrieve ──► Converse +
 | Document format | One Markdown file per ticket. Structured fields go in the `.metadata.json` sidecar. | The S3 connector accepts `.txt`, `.md`, `.html`, `.docx`, `.csv`, `.xlsx` and `.pdf`. It does not accept `.json` as a document. Markdown gives the embedding model prose without keys and braces. |
 | Bad tickets | Keep all. Store `reopened` as metadata. Test with and without a filter. | Scott's "closed twice" heuristic is a signal, not a verdict. |
 | Evaluation | Bedrock Evaluations, retrieve-and-generate RAG job, **bring your own inference responses**. Reference response is the real MLC reply from the `full` variant. The pipeline sees only the `customer` variant. | A first-party job, not a hand-written harness. MLC can rerun it after the PoC to test a new prompt or a new Knowledge Base setup. |
+| Batch processing | Keep the interactive front end on on-demand `Converse`. Add a nightly Lambda or Step Functions job later: `Retrieve` per new ticket, then one Bedrock batch inference job for the drafts. | AgentCore Runtime has no batch-invoke operation, only synchronous invoke, streaming and one long-running async session. Batch inference halves the on-demand token price. See R18. |
 
 Add AgentCore only when Lumis calls the tool over HTTP, when the agent needs the
 Lumis API through a Gateway with permissions separate from a user token, when
@@ -134,6 +135,43 @@ judging. If a managed Knowledge Base or our two-call output shape ever stops
 being accepted by the bring-your-own path, the fallback is the hand-written
 Python harness the requirement first proposed: same held-out set, same LLM
 judge prompt, called directly instead of through a Bedrock evaluation job.
+
+### R18: batch processing
+
+**AgentCore Runtime cannot run in batch.** It offers only synchronous invoke,
+streaming, and one long-running async session per request
+([Handle asynchronous and long running agents](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-long-run.html)).
+
+| | Invocation batch | Agentic |
+| --- | --- | --- |
+| Steps | Fixed: `Retrieve` per ticket, then one Bedrock batch inference job for all the drafts | The model plans its own retrieval steps per ticket, on AgentCore Runtime or Lambda |
+| Model call | Bedrock batch inference, `InvokeModel` or `Converse` body per JSONL record ([Format and upload your batch inference data](https://docs.aws.amazon.com/bedrock/latest/userguide/batch-inference-data.html)) | On-demand `Converse`, no batch mode |
+| Price | 50% of on-demand, both generation models by cross-Region inference profile in `eu-west-2`: `anthropic.claude-sonnet-4-5-20250929-v1:0` and `anthropic.claude-haiku-4-5-20251001-v1:0` ([batch inference support table](https://docs.aws.amazon.com/bedrock/latest/userguide/batch-inference-supported.html), [pricing](https://aws.amazon.com/bedrock/pricing/)) | Full on-demand price |
+| Latency | Hours. No fixed SLA; a job carries an optional `timeoutDurationInHours` ([Create a batch inference job](https://docs.aws.amazon.com/bedrock/latest/userguide/batch-inference-create.html)). Fits a nightly run | Minutes |
+
+An agentic loop can be unrolled into N batch jobs (plan job, on-demand
+`Retrieve`, draft job), but every ticket then takes the same fixed steps, so
+it loses the per-ticket adaptivity that makes it agentic.
+
+Batch inference is not supported for provisioned models, and it does not
+support tool calling or structured output
+([Process multiple prompts with batch inference](https://docs.aws.amazon.com/bedrock/latest/userguide/batch-inference.html)).
+Record-count and file-size minimums and maximums are account quotas, not
+fixed numbers in the guide; check
+[Amazon Bedrock service quotas](https://docs.aws.amazon.com/general/latest/gr/bedrock.html#limits_bedrock)
+before sizing a job.
+
+Fit for this PoC: the interactive front end (`demo/app.py`) needs an answer
+per click, so it stays agentic on-demand. A nightly job over the day's new
+tickets can use invocation batch, since nobody waits on it. Rough cost for
+200 tickets a day, at roughly 3,000 input and 500 output tokens per draft:
+about $1.80/day on-demand against about $0.90/day on batch, at published
+Claude Sonnet rates of $3 per million input tokens and $15 per million output
+tokens. Confirm the exact rate for the model ID and region in use in the
+console; the ratio holds regardless.
+
+The customer can run both approaches on the same held-out set through the
+R10 evaluation job and compare price against quality.
 
 ## Repo layout
 
@@ -394,6 +432,6 @@ The Note column holds the evidence and the test that produced it.
 | R15 | Daily re-sync of new tickets | out | Manual re-run of ETL and sync job in the PoC. |
 | R16 | Ground-truth knowledge base or how-to wiki | out | Deferred at the deep dive. |
 | R17 | Agentic retrieval: plan the search, query again with new filters or terms until the sources are useful | open | Spike on `AgenticRetrieveStream`. It is built into managed Knowledge Bases, takes metadata filters per retriever, and streams a cited answer, so it may replace `Retrieve` plus `Converse`. Its Guardrail supports `BLOCK` only, not `MASK`, so R3 needs a separate `ApplyGuardrail` call on the answer. Compare draft quality and cost against the one-shot path. |
-| R18 | Batch processing to cut cost | open | Research. Bedrock batch inference is priced below on-demand. Fits a nightly run over new tickets, not the interactive front end. |
+| R18 | Batch processing to cut cost | partial | Design settled: on-demand front end, nightly batch job for new tickets. AgentCore Runtime has no batch mode. No batch job has run yet with our model ID, and the batch model table lists Sonnet 4.5, not Sonnet 5. See Findings. |
 | R19 | Ground every draft in the retrieved tickets and minimise hallucination | open | Research. First candidate: the Guardrail contextual grounding check, which scores grounding and relevance against the source chunks. Second: the LLM judge from R10. |
 | R20 | Detailed testing on the 20 ticket sample before the full corpus is loaded | implemented | T3 to T5 run on Sonnet 5 across all four classes and both variants on the 20 ticket sample (2026-09-22). See R3, R6, R7 for the findings. The full load can proceed. |
