@@ -24,6 +24,10 @@ class Fake:
         return {"retrievalResults": [{"content": {"text": "# Password reset email\n\nold thread"}, "score": 0.7,
                                       "metadata": {"ticketId": "T1", "tenant": "acme", "variant": "full"}}]}
 
+    def apply_guardrail(self, **kw):
+        calls["apply_guardrail"] = kw
+        return {"outputs": [{"text": c["text"]["text"].replace("old", "{NAME}")} for c in kw["content"]]}
+
     def converse(self, **kw):
         calls["converse"] = kw
         return {"stopReason": "end_turn", "output": {"message": {"content": [{"reasoningContent": {}}, {"text": '{"label": "howto", "notes": "Used [T1 Password reset email].", "reply": "Do this."}'}]}},
@@ -40,8 +44,10 @@ assert calls["retrieve"]["retrievalConfiguration"]["managedSearchConfiguration"]
 assert out == {"label": "howto", "notes": "Used [T1 Password reset email].", "draft": "Do this.", "blocked": False,
                "grounding": {"GROUNDING": {"score": 0.9, "threshold": 0.5, "action": "NONE"}},
                "sources": [{"ticketId": "T1", "subject": "Password reset email", "tenant": "acme",
-                            "variant": "full", "score": 0.7, "text": "# Password reset email\n\nold thread"}]}
+                            "variant": "full", "score": 0.7, "text": "# Password reset email\n\n{NAME} thread"}]}
 assert calls["converse"]["guardrailConfig"] == {"guardrailIdentifier": "g", "guardrailVersion": "1", "trace": "enabled"}
+# PII is masked before the model: sources and question go through ApplyGuardrail, the model sees the masked text.
+assert calls["apply_guardrail"]["source"] == "OUTPUT" and len(calls["apply_guardrail"]["content"]) == 2
 
 # A blocked draft is plain text, not JSON: it comes back whole with the scores that caused it.
 blocked = {"stopReason": "guardrail_intervened", "output": {"message": {"content": [{"text": "The response was blocked."}]}},
@@ -61,7 +67,7 @@ content = calls["converse"]["messages"][0]["content"]
 grounding = content[0]["guardContent"]["text"]
 query = content[1]["guardContent"]["text"]
 assert grounding["qualifiers"] == ["grounding_source"]
-assert "### Ticket T1 Password reset email (full, score 0.70)\n# Password reset email\n\nold thread" in grounding["text"]
+assert "### Ticket T1 Password reset email (full, score 0.70)\n# Password reset email\n\n{NAME} thread" in grounding["text"]
 assert query == {"text": "## New ticket\n\nq", "qualifiers": ["query"]}
 
 # Metadata title wins over the "# subject" line in the document text.
@@ -71,7 +77,8 @@ def retrieve_with_title(self, **kw):
                                   "metadata": {"ticketId": "T2", "tenant": "acme", "variant": "full", "title": "Real subject"}}]}
 
 
-draft_reply.boto3.client = lambda name: type("F", (), {"retrieve": retrieve_with_title, "converse": Fake().converse})()
+draft_reply.boto3.client = lambda name: type("F", (), {"retrieve": retrieve_with_title, "converse": Fake().converse,
+                                                      "apply_guardrail": Fake().apply_guardrail})()
 out2 = draft_reply.draft("q")
 assert out2["sources"][0]["subject"] == "Real subject"
 

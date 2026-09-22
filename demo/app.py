@@ -22,7 +22,7 @@ if not streamlit.runtime.exists():
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from botocore.exceptions import ClientError  # noqa: E402
-from draft_reply import generate, retrieve  # noqa: E402
+from draft_reply import generate, redact, retrieve  # noqa: E402
 
 VARIANTS = {"Full ticket": "full", "Customer messages only": "customer"}
 # ponytail: the three tenants of the README ingest step, not a live list from the Knowledge Base.
@@ -49,8 +49,10 @@ if st.button("Draft reply", type="primary") and question.strip():
     try:
         with st.status("Searching past tickets…", expanded=True) as status:
             sources = retrieve(question, None if tenant == TENANTS[0] else tenant, variant, n)
-            st.write(f"Found {len(sources)} past tickets. Generating the draft with {model}…")
-            out = generate(question, sources, model)
+            st.write(f"Found {len(sources)} past tickets. Masking PII…")
+            masked, sources = redact(question, sources)
+            st.write(f"Generating the draft with {model}…")
+            out = generate(masked, sources, model)
             status.update(label="Draft ready", state="complete", expanded=False)
     except ClientError as e:
         st.error(str(e))

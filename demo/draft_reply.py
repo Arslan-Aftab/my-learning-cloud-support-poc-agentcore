@@ -127,8 +127,29 @@ def grounding_scores(trace):
                 scores[f["type"]] = {k: f[k] for k in ("score", "threshold", "action")}
     return scores
 
+def redact(question, sources):
+    """Mask PII in the question and the retrieved tickets with the Guardrail, before the model sees them.
+
+    `source="OUTPUT"` because the PII policy's ANONYMIZE action is configured on output. The
+    Converse call keeps the output Guardrail as the second gate.
+    """
+    env = os.environ
+    texts = [s["text"] for s in sources] + [question]
+    outputs = boto3.client("bedrock-runtime").apply_guardrail(
+        guardrailIdentifier=env["GuardrailId"],
+        guardrailVersion=env["GuardrailVersion"],
+        source="OUTPUT",
+        content=[{"text": {"text": t}} for t in texts],
+    )["outputs"]
+    if len(outputs) != len(texts):
+        raise RuntimeError(f"ApplyGuardrail returned {len(outputs)} outputs for {len(texts)} texts")
+    for s, o in zip(sources, outputs):
+        s["text"] = o["text"]
+    return outputs[-1]["text"], sources
+
+
 def draft(question, tenant=None, variant="full", n=5, model="Sonnet"):
-    sources = retrieve(question, tenant, variant, n)
+    question, sources = redact(question, retrieve(question, tenant, variant, n))
     return {**generate(question, sources, model), "sources": sources}
 
 
