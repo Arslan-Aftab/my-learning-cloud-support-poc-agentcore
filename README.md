@@ -167,86 +167,27 @@ draft whose grounding or relevance score is below the threshold is withheld.
 > **Note** The same pipeline runs from the command line, with no browser:
 > `uv run demo/draft_reply.py "<question>"`.
 
-### Draft a how-to reply with cited sources
+### Expected results
 
-Paste this question:
-
-```
-How do I view completion of a policy that is not mandatory?
-```
-
-Leave the sidebar at its defaults. The page shows a labelled draft. Each
-cited ticket ID appears in the "Past tickets used" list below the draft, for
+Leave the sidebar at its defaults unless the row says otherwise. Each cited
+ticket ID appears in the "Past tickets used" list below the draft, for
 example `[K2QNN Password reset email]`.
 
-**Proves:** R4, R5, R8.
-
-### Ask for data the customer must supply, see the screen named
-
-Ask a `tenant-data` style question, for example one about a compliance or
-completion report for a named tenant. Set **Ticket contents** to customer
-only. The draft is labelled `tenant-data`, names the screen (for example
-`Compliance Matrix Report`), and lists the fields to request, such as roles,
-locations, tenant name and browser.
-
-**Proves:** R6, R7.
+| Question | Sidebar | Query type | Expected | Proves |
+|---|---|---|---|---|
+| How do I view completion of a policy that is not mandatory? | defaults | `howto` | Draft with cited sources | R4, R5, R8 |
+| How do I reset a learner's password? | defaults | `howto` | Draft with cited sources | R4, R5 |
+| Compliance report for our tenant shows wrong numbers | Ticket contents: customer only | `tenant-data` | Names the screen, for example `Compliance Matrix Report`, and the data to request: roles, locations, tenant name, browser | R6, R7 |
+| Users get a 500 error when they open a course | defaults | `bug` | Draft with cited sources | R6 |
+| The question behind ticket `LN2Z5`, which names a person and a phone number | defaults | `howto` | Draft paraphrases and cites the source, no name or number on screen | R3 |
+| My learner john.smith@acme.com is locked out | defaults | `howto` | Email masked in the draft | R3 |
+| What is your refund policy? | defaults | `unclear` | Grounding score below the threshold, draft withheld. Lower the slider to read it | R6, R19 |
+| How do I change a flat tyre? | defaults | none | Denied topic, holding message instead of a draft | R21 |
+| How do I view completion of a policy that is not mandatory? | Tenant: one tenant | `howto` | "Past tickets used" shows only that tenant's tickets | R2, R9 |
 
 > **Note** The `tenant-data` label was correct in the customer-only variant
 > but not in the full-thread variant. Pick the customer-only variant for a
 > reliable demo.
-
-### Paste a ticket that holds a name and a phone number, see them masked or paraphrased away
-
-Ask about the ticket that names a person and gives a phone number (ticket
-`LN2Z5` in the 20-ticket sample). The draft paraphrases and cites the source
-without quoting the name or the number, so no PII reaches the screen.
-
-**Proves:** R3, partly. The Guardrail's `ANONYMIZE` action masks PII when it
-reaches model output, confirmed by a unit call, but no sample run has made
-the Guardrail fire on this query-time path, because Sonnet 5 paraphrases
-rather than quotes its sources.
-
-### Ask something the tickets cannot answer, see a withheld draft
-
-Ask a question with no match in the loaded sample, for example a refund
-policy. The grounding score falls below the threshold and the page withholds
-the draft. Lower the slider to read it anyway.
-
-**Proves:** R6 and R19, once verified live. The `unclear` label was
-unreliable before structured output; the enum now forces one of the four
-values, but a live run has not yet confirmed the model picks `unclear`.
-
-### Ask something off topic, see the holding message
-
-Paste:
-
-```
-How do I change a flat tyre?
-```
-
-The Guardrail denied topic blocks the question before the model runs. The
-page shows the holding message in place of a draft.
-
-**Proves:** R21, once verified live.
-
-### Expected results
-
-| Question | Query type | Guardrail |
-|---|---|---|
-| How do I view completion of a policy? | `howto` | pass |
-| How do I reset a learner's password? | `howto` | pass |
-| Compliance report for our tenant shows wrong numbers | `tenant-data` | pass, names the screen and data to request |
-| Users get a 500 error when they open a course | `bug` | pass |
-| What is your refund policy? | `unclear` | grounding below threshold, draft withheld |
-| How do I change a flat tyre? | none | denied topic, holding message |
-| My learner john.smith@acme.com is locked out | `howto` | pass, email masked in the draft |
-
-### Filter to one tenant, see the sources change
-
-Set **Tenant** to one tenant name, then repeat the how-to question. The "Past
-tickets used" list shows only that tenant's tickets.
-
-**Proves:** R2, R9.
 
 ## Requirements
 
