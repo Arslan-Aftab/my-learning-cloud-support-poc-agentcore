@@ -226,7 +226,9 @@ tickets used" list shows only that tenant's tickets.
 `implemented` = built and shown to work. `partial` = part of the path is
 proven. `validated` = not built, but the docs or a spike show it works. `out` =
 not possible or out of scope. `open` = agreed as a goal or a spike, not started.
-The Note column names the demo scenario and the date that proved it.
+The Note column names the demo scenario and the date that proved it. The
+customer's success criteria, from the 2026-08-11 call: a shorter average ticket
+lifetime and fewer hours on first-line support (R23).
 
 | # | Requirement | Status | Note |
 | --- | --- | --- | --- |
@@ -250,6 +252,10 @@ The Note column names the demo scenario and the date that proved it.
 | R18 | Batch processing to cut cost | partial | Design settled: on-demand front end, nightly batch job for new tickets. AgentCore Runtime has no batch mode. No batch job has run yet with our model ID, and the batch model table lists Sonnet 4.5, not Sonnet 5. See Findings. |
 | R19 | Ground every draft in the retrieved tickets and minimise hallucination | partial | The Guardrail contextual grounding policy is in `infrastructure/template.yaml` (GROUNDING and RELEVANCE, threshold 0.5) and `demo/draft_reply.py` passes the retrieved chunks and the question as `guardContent` with `grounding_source` and `query` qualifiers. `cfn-lint` passes. Deploy and a live run are pending; see "Ask something the tickets cannot answer" in Demo. |
 | R20 | Detailed testing on the 20 ticket sample before the full corpus is loaded | implemented | The Demo scenarios ran on Sonnet 5 across all four classes and both variants on the 20 ticket sample (2026-09-22). See R3, R6, R7 for the findings. The full load can proceed. |
+| R21 | Filter retrieval by metadata beyond tenant and variant: priority, support category, data-quality flag, jargon tag | open | Catch-up call 2026-09-17. The ETL writes priority, supportCategory, reopened and hasMlcReply today. The demo filters on tenant and variant only. |
+| R22 | Cost model: PoC spend to date and a production estimate the customer can adjust for query volume, model and token counts | open | Promised in the Assessment Report and on the 2026-08-11 and 2026-09-17 calls. |
+| R23 | Measure the success criteria: average ticket lifetime and first-line support hours, before and after | open | Call 2026-08-11. Needs a baseline from the export (created to closed timestamps) and a way to log agent time after rollout. |
+| R24 | Scrub the corpus: exclude tickets whose MLC reply was wrong or unresolved | open | Assessment Report. The `hasMlcReply` and `reopened` metadata are the first filters. See the Bad tickets decision. |
 
 ## Decisions
 
