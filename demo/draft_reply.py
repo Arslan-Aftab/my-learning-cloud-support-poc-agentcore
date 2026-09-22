@@ -21,7 +21,17 @@ SYSTEM = """You are a support agent for My Learning Cloud (MLC). Draft a reply t
 the new ticket for a human agent to review. Use only the past tickets given.
 Start with one line `Label: <howto|tenant-data|bug|unclear>`. For tenant-data,
 name the screen to check and the data to request from the customer. Cite each
-past ticket you used as [ticketId]."""
+past ticket you used as [ticketId subject], copying the ID and subject exactly
+as given in its heading, for example [K2QNN Password reset email]."""
+
+
+def subject_of(text, metadata):
+    """The ticket subject: the KB `title` metadata, or the doc's `# <subject>` first line."""
+    title = metadata.get("title")
+    if title:
+        return title
+    first_line = text.split("\n", 1)[0]
+    return first_line.removeprefix("# ").strip() if first_line.startswith("# ") else ""
 
 
 def draft(question, tenant=None, variant="full", n=5, model_arn=None):
@@ -38,6 +48,7 @@ def draft(question, tenant=None, variant="full", n=5, model_arn=None):
     sources = [
         {
             "ticketId": r["metadata"].get("ticketId", "?"),
+            "subject": subject_of(r["content"]["text"], r["metadata"]),
             "tenant": r["metadata"].get("tenant", "?"),
             "variant": r["metadata"].get("variant", variant),
             "score": r.get("score", 0.0),
@@ -46,12 +57,16 @@ def draft(question, tenant=None, variant="full", n=5, model_arn=None):
         for r in results
     ]
     context = "\n\n".join(
-        f"### Ticket {s['ticketId']} ({s['variant']}, score {s['score']:.2f})\n{s['text']}" for s in sources
+        f"### Ticket {s['ticketId']} {s['subject']} ({s['variant']}, score {s['score']:.2f})\n{s['text']}"
+        for s in sources
     )
     content = boto3.client("bedrock-runtime").converse(
         modelId=model_arn or env["ModelArn"],
         system=[{"text": SYSTEM}],
-        messages=[{"role": "user", "content": [{"text": f"## Past tickets\n\n{context}\n\n## New ticket\n\n{question}"}]}],
+        messages=[{"role": "user", "content": [
+            {"guardContent": {"text": {"text": f"## Past tickets\n\n{context}", "qualifiers": ["grounding_source"]}}},
+            {"guardContent": {"text": {"text": f"## New ticket\n\n{question}", "qualifiers": ["query"]}}},
+        ]}],
         guardrailConfig={
             "guardrailIdentifier": env["GuardrailId"],
             "guardrailVersion": env["GuardrailVersion"],
@@ -69,4 +84,4 @@ if __name__ == "__main__":
     out = draft(" ".join(sys.argv[1:]))
     print(f"Label: {out['label']}\n\n{out['draft']}\n\nSources:")
     for s in out["sources"]:
-        print(f"{s['ticketId']}  {s['tenant']}  {s['score']:.2f}")
+        print(f"{s['ticketId']}  {s['subject']}  {s['tenant']}  {s['score']:.2f}")

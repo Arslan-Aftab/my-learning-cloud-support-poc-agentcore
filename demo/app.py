@@ -39,5 +39,5 @@ if st.button("Draft reply") and question.strip():
         st.subheader(f"Label: {out['label']}")
         st.markdown(out["draft"])
         for s in out["sources"]:
-            with st.expander(f"{s['ticketId']} · {s['tenant']} · {s['variant']} · {s['score']:.2f}"):
+            with st.expander(f"{s['ticketId']} · {s['subject']} · {s['tenant']} · {s['variant']} · {s['score']:.2f}"):
                 st.text(s["text"])
