@@ -8,8 +8,8 @@ is done and the README says so.
 Retrieval works. A question returns the right past ticket from a 20 ticket
 sample, and a metadata filter narrows the results to one variant.
 `demo/draft_reply.py` drafts a labelled reply with citations on that sample.
-T3 to T5 have run on Sonnet 5 across every class and both variants
-(2026-09-22, R20). `demo/app.py` has not been tried in a browser.
+The Demo scenarios in `README.md` have run on Sonnet 5 across every class and
+both variants (2026-09-22, R20). `demo/app.py` has not been tried in a browser.
 
 ## Requirements not met
 
@@ -24,8 +24,8 @@ T3 to T5 have run on Sonnet 5 across every class and both variants
 
 1. Load the full corpus. Run the ETL with no `--limit`, sync, ingest, and
    check the job statistics against 13,900 documents.
-2. Re-run T4 with a question whose draft is more likely to quote PII
-   verbatim, to prove the Guardrail fires on the query-time path.
+2. Re-run the PII demo scenario with a question whose draft is more likely to
+   quote PII verbatim, to prove the Guardrail fires on the query-time path.
 3. Tighten the classification prompt so `unclear` and the full-thread variant
    classify as reliably as the customer-only variant.
 4. Decide Sonnet against Haiku for drafting, on quality and on cost.

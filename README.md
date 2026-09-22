@@ -22,6 +22,237 @@ new ticket ──► demo/draft_reply.py ──► Retrieve ──► Converse +
            └─► demo/app.py (Streamlit, same pipeline) ──────────────────────► browser
 ```
 
+## Setup
+
+### Prerequisites
+
+Once per machine.
+
+- [uv](https://docs.astral.sh/uv/). It fetches Python and every dependency,
+  so there is nothing to install first. Run each script with `uv run`.
+- `cfn-lint`: `uv tool install cfn-lint`.
+- AWS CLI 2.36 or later: `brew install awscli`. Older builds reject
+  `managedSearchConfiguration`.
+- Access to the PoC account `938733851942` in the Lambert Labs organisation
+  through the `ll-aws-main` SSO session. Add the profile to `~/.aws/config`.
+
+  ```ini
+  [profile mlc-support-poc]
+  sso_session = ll-aws-main
+  sso_account_id = 938733851942
+  sso_role_name = AdministratorAccess
+  region = eu-west-2
+  ```
+
+- The ticket export. Download `super-admin.tickets.json` from the project
+  Drive folder to `data/`. The password is in the Teams chat. Never commit it.
+
+Sign in before each session: `aws sso login --profile mlc-support-poc`.
+
+> **Note** A new AWS account cannot call Claude Sonnet 5 until AWS has
+> verified it, which takes a few hours. The call fails with
+> `AccessDeniedException: Your account is currently being verified`. Until it
+> clears, pick Haiku in the page, or pass `model="Haiku"` to `draft()`.
+
+### Deploying
+
+The template creates the ticket bucket, the Knowledge Base role, the managed
+Knowledge Base, the S3 data source, the ingestion log group and the PII
+Guardrail. Nothing else is needed.
+
+1. Lint:
+
+   ```shell
+   cfn-lint --regions eu-west-2 -t infrastructure/template.yaml
+   ```
+
+2. Deploy. Repeat after every template change:
+
+   ```shell
+   aws cloudformation deploy --stack-name mlc-support-poc \
+     --profile mlc-support-poc --region eu-west-2 \
+     --template-file infrastructure/template.yaml \
+     --capabilities CAPABILITY_NAMED_IAM
+   ```
+
+3. Write the profile, the region, the stack outputs and the two model ARNs to
+   `.env`, which git ignores:
+
+   ```shell
+   { echo "AWS_PROFILE=mlc-support-poc"
+     echo "AWS_REGION=eu-west-2"
+     echo "SonnetModelArn=arn:aws:bedrock:eu-west-2:938733851942:inference-profile/eu.anthropic.claude-sonnet-5"
+     echo "HaikuModelArn=arn:aws:bedrock:eu-west-2:938733851942:inference-profile/eu.anthropic.claude-haiku-4-5-20251001-v1:0"
+     aws cloudformation describe-stacks --stack-name mlc-support-poc \
+       --profile mlc-support-poc --region eu-west-2 \
+       --query 'Stacks[0].Outputs[].join(`=`,[OutputKey,OutputValue])' \
+       --output text | tr '\t' '\n'
+   } > .env
+   ```
+
+### Loading tickets
+
+Repeat when the export changes. Load a small sample first, check the
+ingestion result and one retrieval, then load the three tenants.
+
+In each new shell:
+
+```shell
+set -a; source .env; set +a
+```
+
+1. Split the export:
+
+   ```shell
+   uv run etl/split_tickets.py data/super-admin.tickets.json out/ --limit 20
+   ```
+
+   For the three tenant corpus, filter by tenant. `--limit` caps the total:
+
+   ```shell
+   uv run etl/split_tickets.py data/super-admin.tickets.json out/ \
+     --tenants spf,optalis,stjudescare --limit 200
+   ```
+
+2. Upload. `--delete` removes files that are no longer in `out/`, which
+   avoids the re-ingest failure noted in Findings:
+
+   ```shell
+   aws s3 sync out/ s3://$BucketName/tickets/ --delete
+   ```
+
+3. Start the ingestion job:
+
+   ```shell
+   aws bedrock-agent start-ingestion-job \
+     --knowledge-base-id $KnowledgeBaseId --data-source-id $DataSourceId
+   ```
+
+4. Poll until the status is `COMPLETE` and `numberOfNewDocumentsIndexed` is
+   not zero:
+
+   ```shell
+   aws bedrock-agent list-ingestion-jobs \
+     --knowledge-base-id $KnowledgeBaseId --data-source-id $DataSourceId \
+     --query 'ingestionJobSummaries[0].[status,statistics]'
+   ```
+
+5. If documents failed, read the reasons:
+
+   ```shell
+   aws logs filter-log-events --log-group-name $IngestionLogGroup \
+     --filter-pattern '{ $.event.error_message = * }' \
+     --query 'events[].message' --output text | head
+   ```
+
+## Demo
+
+Run this once the tickets are loaded (see Loading tickets above).
+
+```shell
+set -a; source .env; set +a
+```
+
+```shell
+uv run demo/app.py
+```
+
+The page opens in a browser. The sidebar holds three settings: **Model**
+(Sonnet or Haiku), **Ticket contents** (full thread or customer only), and
+**Tenant** (empty searches all tenants). Paste a question in the box and
+click **Draft reply**.
+
+> **Note** The same pipeline runs from the command line, with no browser:
+> `uv run demo/draft_reply.py "<question>"`.
+
+### Draft a how-to reply with cited sources
+
+Paste this question:
+
+```
+How do I view completion of a policy that is not mandatory?
+```
+
+Leave the sidebar at its defaults. The page shows a labelled draft. Each
+cited ticket ID appears in the "Past tickets used" list below the draft, for
+example `[K2QNN Password reset email]`.
+
+**Proves:** R4, R5, R8.
+
+### Ask for data the customer must supply, see the screen named
+
+Ask a `tenant-data` style question, for example one about a compliance or
+completion report for a named tenant. Set **Ticket contents** to customer
+only. The draft is labelled `tenant-data`, names the screen (for example
+`Compliance Matrix Report`), and lists the fields to request, such as roles,
+locations, tenant name and browser.
+
+**Proves:** R6, R7.
+
+> **Note** The `tenant-data` label was correct in the customer-only variant
+> but not in the full-thread variant. Pick the customer-only variant for a
+> reliable demo.
+
+### Paste a ticket that holds a name and a phone number, see them masked or paraphrased away
+
+Ask about the ticket that names a person and gives a phone number (ticket
+`LN2Z5` in the 20-ticket sample). The draft paraphrases and cites the source
+without quoting the name or the number, so no PII reaches the screen.
+
+**Proves:** R3, partly. The Guardrail's `ANONYMIZE` action masks PII when it
+reaches model output, confirmed by a unit call, but no sample run has made
+the Guardrail fire on this query-time path, because Sonnet 5 paraphrases
+rather than quotes its sources.
+
+### Ask something the tickets cannot answer, see an unclear label or a refused draft
+
+Ask a question with no match in the loaded sample. Today the label is
+unreliable: an `unclear` question came back labelled `tenant-data`, not
+`unclear`, in both variants.
+
+**Proves:** R6, partly. R19 is not yet deployed; once the contextual
+grounding Guardrail is live, a question the sources cannot support should
+instead return a blocked or flagged draft.
+
+### Filter to one tenant, see the sources change
+
+Set **Tenant** to one tenant name, then repeat the how-to question. The "Past
+tickets used" list shows only that tenant's tickets.
+
+**Proves:** R2, R9.
+
+## Requirements
+
+`implemented` = built and shown to work. `partial` = part of the path is
+proven. `validated` = not built, but the docs or a spike show it works. `out` =
+not possible or out of scope. `open` = agreed as a goal or a spike, not started.
+The Note column names the demo scenario and the date that proved it.
+
+| # | Requirement | Status | Note |
+| --- | --- | --- | --- |
+| R1 | Split the export into one document per ticket with metadata | implemented | `etl/split_tickets.py`. 6,950 tickets, 13,900 documents, 11 MB. |
+| R2 | Ingest full-thread and customer-only variants side by side | implemented | "Filter to one tenant" scenario, 2026-09-14: a `variant` filter returned customer chunks only. |
+| R3 | Redact PII in the drafted reply | partial | "Paste a ticket that holds a name and a phone number" scenario, 20-ticket sample (2026-09-22): the question's top source (`LN2Z5`) names a person and gives a phone number, both variants. Sonnet 5 paraphrased and cited the source without quoting the name or the number, so the Guardrail did not fire in either run. A separate unit call still confirms `ANONYMIZE` masks PII once it reaches output (2026-09-14). The query-time path stays unproven until a draft actually quotes PII. |
+| R4 | Retrieve similar past tickets for a new ticket | implemented | "Draft a how-to reply" scenario, 2026-09-14: `Retrieve` ranked the matching ticket first at score 0.75. |
+| R5 | Draft a reply with citations to source ticket IDs | implemented | "Draft a how-to reply" scenario, 2026-09-22: Haiku cited `[K2QNN]` and `[LR232]`, both in the five retrieved chunks. Sonnet 5 first cited the subject alone; after a prompt fix it cited `[K2QNN Password reset email]`, confirmed across 12 runs, every cited ID present in that run's sources. |
+| R6 | Classify the ticket: `howto`, `tenant-data`, `bug`, `unclear` | partial | "Ask for data the customer must supply" and "Ask something the tickets cannot answer" scenarios, Sonnet 5, one question per class, both variants (2026-09-22): `howto` correct in both variants; `tenant-data` correct in the customer variant, mislabelled `bug` in the full variant; `bug` correct in the full variant, mislabelled `howto` in the customer variant; the `unclear` question was labelled `tenant-data` in both variants, never `unclear`. 3 of 4 classes got the right label in at least one variant. |
+| R7 | Signpost for `tenant-data` tickets: name the screen and the data to request | implemented | "Ask for data the customer must supply" scenario, Sonnet 5, customer variant (2026-09-22): draft named the screen (`Compliance Matrix Report`) and listed the roles, locations, tenant name and browser to request. |
+| R8 | Human review of every draft | validated | Output is console or page text. Nothing is sent. |
+| R9 | Data stays in UK or EU | validated | `eu-west-2` plus `eu.` inference profile. |
+| R10 | Evaluate drafts against real MLC replies on held-out tickets | partial | Path chosen: Bedrock Evaluations, retrieve-and-generate RAG job, bring your own inference responses (see Findings). Not built. |
+| R11 | Keep idle infra cost near zero | validated | Managed Knowledge Base bills storage and retrievals only. |
+| R12 | Answer questions that need live tenant data from Lumis | out | No Lumis API in scope. The draft asks the customer for the data. |
+| R13 | Write suggestions back into Lumis | out | Kick-off decision. |
+| R14 | Handle customer-specific jargon | out | Revisit after evaluation. Tenant metadata filter is the first idea. |
+| R15 | Daily re-sync of new tickets | out | Manual re-run of ETL and sync job in the PoC. |
+| R16 | Ground-truth knowledge base or how-to wiki | out | Deferred at the deep dive. |
+| R17 | Agentic retrieval: plan the search, query again with new filters or terms until the sources are useful | open | Spike on `AgenticRetrieveStream`. It is built into managed Knowledge Bases, takes metadata filters per retriever, and streams a cited answer, so it may replace `Retrieve` plus `Converse`. Its Guardrail supports `BLOCK` only, not `MASK`, so R3 needs a separate `ApplyGuardrail` call on the answer. Compare draft quality and cost against the one-shot path. |
+| R18 | Batch processing to cut cost | partial | Design settled: on-demand front end, nightly batch job for new tickets. AgentCore Runtime has no batch mode. No batch job has run yet with our model ID, and the batch model table lists Sonnet 4.5, not Sonnet 5. See Findings. |
+| R19 | Ground every draft in the retrieved tickets and minimise hallucination | partial | The Guardrail contextual grounding policy is in `infrastructure/template.yaml` (GROUNDING and RELEVANCE, threshold 0.5) and `demo/draft_reply.py` passes the retrieved chunks and the question as `guardContent` with `grounding_source` and `query` qualifiers. `cfn-lint` passes. Deploy and a live run are pending; see "Ask something the tickets cannot answer" in Demo. |
+| R20 | Detailed testing on the 20 ticket sample before the full corpus is loaded | implemented | The Demo scenarios ran on Sonnet 5 across all four classes and both variants on the 20 ticket sample (2026-09-22). See R3, R6, R7 for the findings. The full load can proceed. |
+
+## Decisions
+
 | Area | Decision | Why |
 | --- | --- | --- |
 | Region | `eu-west-2` London | UK or Ireland data residency. Every service below is available there. |
@@ -187,7 +418,7 @@ R10 evaluation job and compare price against quality.
 | `infrastructure/template.yaml` | CloudFormation: bucket, Knowledge Base role, Knowledge Base, data source, Guardrail. |
 | `demo/draft_reply.py` | Retrieve, Converse with the Guardrail, print the draft and the sources. |
 | `demo/agentic_reply.py` | R17 spike of `AgenticRetrieveStream`. No-go, kept as evidence. |
-| `demo/app.py` | Local Streamlit page around the same pipeline. Paste the customer query, pick Sonnet or Haiku and full or customer-only ticket contents, watch the search and the draft, edit the reply and copy it. |
+| `demo/app.py` | Local Streamlit page around the same pipeline. See Demo above. |
 | `data/` | Local ticket export. Git ignores it. |
 | `out/` | ETL output. Git ignores it. |
 | `HANDOFF.md` | Open work and next steps. This file holds the status quo. |
@@ -195,251 +426,3 @@ R10 evaluation job and compare price against quality.
 Every script carries a [PEP 723](https://peps.python.org/pep-0723/) header that
 names its own dependencies. `uv run <script>` is enough on a clean machine.
 There is no `requirements.txt` and no shared virtual environment.
-
-## Prerequisites
-
-Once per machine.
-
-- [uv](https://docs.astral.sh/uv/). It fetches Python and every dependency,
-  so there is nothing to install first. Run each script with `uv run`.
-- `cfn-lint`: `uv tool install cfn-lint`.
-- AWS CLI 2.36 or later: `brew install awscli`. Older builds reject
-  `managedSearchConfiguration`.
-- Access to the PoC account `938733851942` in the Lambert Labs organisation
-  through the `ll-aws-main` SSO session. Add the profile to `~/.aws/config`.
-
-  ```ini
-  [profile mlc-support-poc]
-  sso_session = ll-aws-main
-  sso_account_id = 938733851942
-  sso_role_name = AdministratorAccess
-  region = eu-west-2
-  ```
-
-- The ticket export. Download `super-admin.tickets.json` from the project
-  Drive folder to `data/`. The password is in the Teams chat. Never commit it.
-
-Sign in before each session: `aws sso login --profile mlc-support-poc`.
-
-> **Note** A new AWS account cannot call Claude Sonnet 5 until AWS has
-> verified it, which takes a few hours. The call fails with
-> `AccessDeniedException: Your account is currently being verified`. Until it
-> clears, pick Haiku in the page, or pass `model="Haiku"` to `draft()`.
-
-## Deploying
-
-The template creates the ticket bucket, the Knowledge Base role, the managed
-Knowledge Base, the S3 data source, the ingestion log group and the PII
-Guardrail. Nothing else is needed.
-
-1. Lint:
-
-   ```shell
-   cfn-lint --regions eu-west-2 -t infrastructure/template.yaml
-   ```
-
-2. Deploy. Repeat after every template change:
-
-   ```shell
-   aws cloudformation deploy --stack-name mlc-support-poc \
-     --profile mlc-support-poc --region eu-west-2 \
-     --template-file infrastructure/template.yaml \
-     --capabilities CAPABILITY_NAMED_IAM
-   ```
-
-3. Write the profile, the region, the stack outputs and the two model ARNs to
-   `.env`, which git ignores:
-
-   ```shell
-   { echo "AWS_PROFILE=mlc-support-poc"
-     echo "AWS_REGION=eu-west-2"
-     echo "SonnetModelArn=arn:aws:bedrock:eu-west-2:938733851942:inference-profile/eu.anthropic.claude-sonnet-5"
-     echo "HaikuModelArn=arn:aws:bedrock:eu-west-2:938733851942:inference-profile/eu.anthropic.claude-haiku-4-5-20251001-v1:0"
-     aws cloudformation describe-stacks --stack-name mlc-support-poc \
-       --profile mlc-support-poc --region eu-west-2 \
-       --query 'Stacks[0].Outputs[].join(`=`,[OutputKey,OutputValue])' \
-       --output text | tr '\t' '\n'
-   } > .env
-   ```
-
-## Loading tickets
-
-Repeat when the export changes. Load a small sample first, check the
-ingestion result and one retrieval, then load the three tenants.
-
-In each new shell:
-
-```shell
-set -a; source .env; set +a
-```
-
-1. Split the export:
-
-   ```shell
-   uv run etl/split_tickets.py data/super-admin.tickets.json out/ --limit 20
-   ```
-
-   For the three tenant corpus, filter by tenant. `--limit` caps the total.
-   The Tenant drop-down in `demo/app.py` lists these three tenants; edit
-   `TENANTS` there if you ingest others:
-
-   ```shell
-   uv run etl/split_tickets.py data/super-admin.tickets.json out/ \
-     --tenants spf,optalis,stjudescare --limit 200
-   ```
-
-2. Upload. `--delete` removes files that are no longer in `out/`, which
-   avoids the re-ingest failure noted in Findings:
-
-   ```shell
-   aws s3 sync out/ s3://$BucketName/tickets/ --delete
-   ```
-
-3. Start the ingestion job:
-
-   ```shell
-   aws bedrock-agent start-ingestion-job \
-     --knowledge-base-id $KnowledgeBaseId --data-source-id $DataSourceId
-   ```
-
-4. Poll until the status is `COMPLETE` and `numberOfNewDocumentsIndexed` is
-   not zero:
-
-   ```shell
-   aws bedrock-agent list-ingestion-jobs \
-     --knowledge-base-id $KnowledgeBaseId --data-source-id $DataSourceId \
-     --query 'ingestionJobSummaries[0].[status,statistics]'
-   ```
-
-5. If documents failed, read the reasons:
-
-   ```shell
-   aws logs filter-log-events --log-group-name $IngestionLogGroup \
-     --filter-pattern '{ $.event.error_message = * }' \
-     --query 'events[].message' --output text | head
-   ```
-
-## Testing
-
-Each test has one meaning. The table below is the only place that maps tests
-to requirements. When a test passes, record the date and the evidence in the
-[requirements](#requirements) table at the end of this file.
-
-In each new shell:
-
-```shell
-set -a; source .env; set +a
-```
-
-| Test | Meaning | Requirements |
-|---|---|---|
-| T1 | Retrieve past tickets for a question | R4 |
-| T2 | Retrieve with a metadata filter | R2 |
-| T3 | Ask a question, get a drafted reply with citations | R5, R8 |
-| T4 | Ask a question whose sources hold PII, get a redacted draft | R3 |
-| T5 | Classify and signpost | R6, R7 |
-| T6 | Compare a draft with the real MLC reply on a held-out ticket | R10 |
-| T7 | Confirm region and idle cost | R9, R11 |
-
-### T1 Retrieve
-
-Ask a how-to question. Expect chunks whose `metadata.ticketId` values are real
-ticket IDs and a sensible top result.
-
-```shell
-aws bedrock-agent-runtime retrieve --knowledge-base-id $KnowledgeBaseId \
-  --retrieval-query '{"text":"How do I view completion of a policy that is not mandatory?"}' \
-  --retrieval-configuration '{"managedSearchConfiguration":{"numberOfResults":3}}' \
-  --query 'retrievalResults[].[score,metadata.ticketId,metadata.variant]'
-```
-
-### T2 Retrieve with a filter
-
-Repeat T1 with a filter. Expect every result to have `variant` = `customer`.
-
-```shell
-  --retrieval-configuration '{"managedSearchConfiguration":{"numberOfResults":3,"filter":{"equals":{"key":"variant","value":"customer"}}}}'
-```
-
-### T3 Ask a question
-
-`demo/draft_reply.py` runs T1, builds a prompt from the chunks and calls
-`Converse` with the Guardrail attached. Type any support question. Expect a
-draft that cites the ticket IDs it used and nothing sent anywhere.
-
-```shell
-uv run demo/draft_reply.py "How do I view completion of a policy that is not mandatory?"
-```
-
-The same pipeline runs in a local browser page. Paste a ticket, set the
-tenant filter, the variant and the result count in the sidebar, and read the
-draft with one expander per source. Nothing is hosted.
-
-```shell
-uv run demo/app.py
-```
-
-### T4 Ask a question that surfaces PII
-
-Run T3 twice. First with a question whose matching tickets name a person or
-give a phone number. Expect `{NAME}`, `{PHONE}` or `{EMAIL}` in the draft.
-Then with a question whose tickets hold no PII. Expect an unchanged draft.
-Pick both questions from the sample once the corpus is loaded.
-
-The unit check below proves the Guardrail alone. Expect `action` =
-`GUARDRAIL_INTERVENED`. The source must be `OUTPUT`; input is not redacted by
-design.
-
-```shell
-aws bedrock-runtime apply-guardrail \
-  --guardrail-identifier $GuardrailId --guardrail-version $GuardrailVersion \
-  --source OUTPUT \
-  --content '[{"text":{"text":"Please call Jane Smith on 07700 900123 or email jane@example.com"}}]'
-```
-
-### T5 Classify and signpost
-
-Run T3 with one question per class: `howto`, `tenant-data`, `bug`, `unclear`.
-Expect the right label on each. For `tenant-data`, expect the draft to name
-the screen and the data to request from the customer.
-
-### T6 Compare with the real reply
-
-Hold out a closed ticket with an MLC reply. Run T3 on its customer-only text.
-Compare the draft with the real reply by hand. Design the judge later.
-
-### T7 Region and cost
-
-Confirm the Knowledge Base ARN and the model ARN in `.env` are `eu-west-2`
-and `eu.`. Read the bill after a quiet week and expect storage and retrieval
-charges only.
-
-## Requirements
-
-`implemented` = built and shown to work. `partial` = part of the path is
-proven. `validated` = not built, but the docs or a spike show it works. `out` =
-not possible or out of scope. `open` = agreed as a goal or a spike, not started.
-The Note column holds the evidence and the test that produced it.
-
-| # | Requirement | Status | Note |
-| --- | --- | --- | --- |
-| R1 | Split the export into one document per ticket with metadata | implemented | `etl/split_tickets.py`. 6,950 tickets, 13,900 documents, 11 MB. |
-| R2 | Ingest full-thread and customer-only variants side by side | implemented | `equals` filter on `variant` returned customer chunks only (T2, 2026-09-14). |
-| R3 | Redact PII in the drafted reply | partial | T4 on Sonnet 5, 20 ticket sample (2026-09-22): asked a question whose top source (`LN2Z5`) names a person and a phone number, both variants. Sonnet 5 paraphrased the source and cited it, but never quoted the name or the number, so no PII reached the output and the Guardrail did not fire in either run. The Guardrail unit check still proves `ANONYMIZE` works when PII does reach the output (T4 unit, 2026-09-14). The query-time path is unproven until a draft actually leaks PII. |
-| R4 | Retrieve similar past tickets for a new ticket | implemented | `Retrieve` ranked the matching ticket first at score 0.75 (T1, 2026-09-14). |
-| R5 | Draft a reply with citations to source ticket IDs | implemented | `demo/draft_reply.py` with Haiku drafted a reply that cited `[K2QNN]` and `[LR232]`, both in the five retrieved chunks (T3, 2026-09-22). Sonnet 5 initially cited the subject alone, e.g. `[Password reset email]`, not the ID; fixed the prompt and context to show `[ticketId subject]`, and a live run cited `[K2QNN Password reset email]` (T3, 2026-09-22). Confirmed again with Sonnet 5 across 12 runs (T4/T5, 2026-09-22): every cited ticket ID was in that run's retrieved sources. |
-| R6 | Classify the ticket: `howto`, `tenant-data`, `bug`, `unclear` | partial | T5 on Sonnet 5, one question per class, both variants (2026-09-22): `howto` correct in both variants; `tenant-data` correct in the customer variant, mislabelled `bug` in the full variant; `bug` correct in the full variant, mislabelled `howto` in the customer variant; the `unclear` question was labelled `tenant-data` in both variants, never `unclear`. 3 of 4 classes got the right label in at least one variant. |
-| R7 | Signpost for `tenant-data` tickets: name the screen and the data to request | implemented | T5 on Sonnet 5, `tenant-data` question, customer variant (2026-09-22): draft named the screen (`Compliance Matrix Report`) and listed the roles, locations, tenant name and browser to request. |
-| R8 | Human review of every draft | validated | Output is console text. Nothing is sent. |
-| R9 | Data stays in UK or EU | validated | `eu-west-2` plus `eu.` inference profile. |
-| R10 | Evaluate drafts against real MLC replies on held-out tickets | partial | Path chosen: Bedrock Evaluations, retrieve-and-generate RAG job, bring your own inference responses (see Findings). Not built. |
-| R11 | Keep idle infra cost near zero | validated | Managed Knowledge Base bills storage and retrievals only. |
-| R12 | Answer questions that need live tenant data from Lumis | out | No Lumis API in scope. The draft asks the customer for the data. |
-| R13 | Write suggestions back into Lumis | out | Kick-off decision. |
-| R14 | Handle customer-specific jargon | out | Revisit after evaluation. Tenant metadata filter is the first idea. |
-| R15 | Daily re-sync of new tickets | out | Manual re-run of ETL and sync job in the PoC. |
-| R16 | Ground-truth knowledge base or how-to wiki | out | Deferred at the deep dive. |
-| R17 | Agentic retrieval: plan the search, query again with new filters or terms until the sources are useful | out | Spiked `AgenticRetrieveStream`. No-go: rejects the `ANONYMIZE` Guardrail and has no system prompt for the `Label:` line. See Findings. |
-| R18 | Batch processing to cut cost | partial | Design settled: on-demand front end, nightly batch job for new tickets. AgentCore Runtime has no batch mode. No batch job has run yet with our model ID, and the batch model table lists Sonnet 4.5, not Sonnet 5. See Findings. |
-| R19 | Ground every draft in the retrieved tickets and minimise hallucination | partial | The Guardrail contextual grounding policy is in `infrastructure/template.yaml` (GROUNDING and RELEVANCE, threshold 0.5) and `demo/draft_reply.py` passes the retrieved chunks and the question as `guardContent` with `grounding_source` and `query` qualifiers. `cfn-lint` passes. Deploy and a live run are pending. |
-| R20 | Detailed testing on the 20 ticket sample before the full corpus is loaded | implemented | T3 to T5 run on Sonnet 5 across all four classes and both variants on the 20 ticket sample (2026-09-22). See R3, R6, R7 for the findings. The full load can proceed. |
