@@ -6,8 +6,8 @@
 
 Usage: uv run demo/draft_reply.py "How do I view completion of a policy?"
 
-Reads KnowledgeBaseId, ModelArn, GuardrailId and GuardrailVersion from the
-environment (`set -a; source .env; set +a`). Retrieves similar tickets from the
+Reads KnowledgeBaseId, SonnetModelArn, HaikuModelArn, GuardrailId and
+GuardrailVersion from the environment (`set -a; source .env; set +a`). Retrieves similar tickets from the
 managed Knowledge Base, then asks the model for a labelled draft with the PII
 Guardrail on the output. Nothing is sent to a customer.
 """
@@ -34,34 +34,44 @@ def subject_of(text, metadata):
     return first_line.removeprefix("# ").strip() if first_line.startswith("# ") else ""
 
 
-def draft(question, tenant=None, variant="full", n=5, model_arn=None):
-    env = os.environ
+def retrieve(question, tenant=None, variant="full", n=5):
+    """Similar past tickets, one entry per ticket, best score first. Chunks of one ticket are joined."""
     conditions = [{"equals": {"key": "variant", "value": variant}}]
     if tenant:
         conditions.append({"equals": {"key": "tenant", "value": tenant}})
     search = {"numberOfResults": n, "filter": conditions[0] if len(conditions) == 1 else {"andAll": conditions}}
     results = boto3.client("bedrock-agent-runtime").retrieve(
-        knowledgeBaseId=env["KnowledgeBaseId"],
+        knowledgeBaseId=os.environ["KnowledgeBaseId"],
         retrievalQuery={"text": question},
         retrievalConfiguration={"managedSearchConfiguration": search},
     )["retrievalResults"]
-    sources = [
-        {
-            "ticketId": r["metadata"].get("ticketId", "?"),
-            "subject": subject_of(r["content"]["text"], r["metadata"]),
+    by_ticket = {}
+    for r in results:
+        ticket_id = r["metadata"].get("ticketId", "?")
+        text = r["content"]["text"]
+        if ticket_id in by_ticket:
+            by_ticket[ticket_id]["text"] += "\n\n" + text
+            continue
+        by_ticket[ticket_id] = {
+            "ticketId": ticket_id,
+            "subject": subject_of(text, r["metadata"]),
             "tenant": r["metadata"].get("tenant", "?"),
             "variant": r["metadata"].get("variant", variant),
             "score": r.get("score", 0.0),
-            "text": r["content"]["text"],
+            "text": text,
         }
-        for r in results
-    ]
+    return list(by_ticket.values())
+
+
+def generate(question, sources, model="Sonnet"):
+    """Ask the model for a labelled draft. `model` is Sonnet or Haiku, ARN from `<model>ModelArn`."""
+    env = os.environ
     context = "\n\n".join(
         f"### Ticket {s['ticketId']} {s['subject']} ({s['variant']}, score {s['score']:.2f})\n{s['text']}"
         for s in sources
     )
     content = boto3.client("bedrock-runtime").converse(
-        modelId=model_arn or env["ModelArn"],
+        modelId=env[f"{model}ModelArn"],
         system=[{"text": SYSTEM}],
         messages=[{"role": "user", "content": [
             {"guardContent": {"text": {"text": f"## Past tickets\n\n{context}", "qualifiers": ["grounding_source"]}}},
@@ -77,7 +87,12 @@ def draft(question, tenant=None, variant="full", n=5, model_arn=None):
     reply = next(b["text"] for b in content if "text" in b).strip()
     first, _, rest = reply.partition("\n")
     label = first.removeprefix("Label:").strip().lower() if first.startswith("Label:") else "unclear"
-    return {"label": label, "draft": rest.strip() if first.startswith("Label:") else reply, "sources": sources}
+    return {"label": label, "draft": rest.strip() if first.startswith("Label:") else reply}
+
+
+def draft(question, tenant=None, variant="full", n=5, model="Sonnet"):
+    sources = retrieve(question, tenant, variant, n)
+    return {**generate(question, sources, model), "sources": sources}
 
 
 if __name__ == "__main__":

@@ -182,7 +182,7 @@ R10 evaluation job and compare price against quality.
 | `tests/` | Self-check for the ETL, with one fixture ticket |
 | `infrastructure/template.yaml` | CloudFormation: bucket, Knowledge Base role, Knowledge Base, data source, Guardrail. |
 | `demo/draft_reply.py` | Retrieve, Converse with the Guardrail, print the draft and the sources. |
-| `demo/app.py` | Local Streamlit page around the same pipeline. Paste a ticket, set tenant and variant, read the draft and the sources. |
+| `demo/app.py` | Local Streamlit page around the same pipeline. Paste the customer query, pick Sonnet or Haiku and full or customer-only ticket contents, watch the search and the draft, edit the reply and copy it. |
 | `data/` | Local ticket export. Git ignores it. |
 | `out/` | ETL output. Git ignores it. |
 | `HANDOFF.md` | Open work and next steps. This file holds the status quo. |
@@ -219,8 +219,7 @@ Sign in before each session: `aws sso login --profile mlc-support-poc`.
 > **Note** A new AWS account cannot call Claude Sonnet 5 until AWS has
 > verified it, which takes a few hours. The call fails with
 > `AccessDeniedException: Your account is currently being verified`. Until it
-> clears, put `ModelArn=eu.anthropic.claude-haiku-4-5-20251001-v1:0` in
-> `.env`.
+> clears, pick Haiku in the page, or pass `model="Haiku"` to `draft()`.
 
 ## Deploying
 
@@ -243,13 +242,14 @@ Guardrail. Nothing else is needed.
      --capabilities CAPABILITY_NAMED_IAM
    ```
 
-3. Write the profile, the region, the stack outputs and the model ARN to
+3. Write the profile, the region, the stack outputs and the two model ARNs to
    `.env`, which git ignores:
 
    ```shell
    { echo "AWS_PROFILE=mlc-support-poc"
      echo "AWS_REGION=eu-west-2"
-     echo "ModelArn=arn:aws:bedrock:eu-west-2:938733851942:inference-profile/eu.anthropic.claude-sonnet-5"
+     echo "SonnetModelArn=arn:aws:bedrock:eu-west-2:938733851942:inference-profile/eu.anthropic.claude-sonnet-5"
+     echo "HaikuModelArn=arn:aws:bedrock:eu-west-2:938733851942:inference-profile/eu.anthropic.claude-haiku-4-5-20251001-v1:0"
      aws cloudformation describe-stacks --stack-name mlc-support-poc \
        --profile mlc-support-poc --region eu-west-2 \
        --query 'Stacks[0].Outputs[].join(`=`,[OutputKey,OutputValue])' \

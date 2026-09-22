@@ -29,7 +29,7 @@ class Fake:
 
 
 draft_reply.boto3.client = lambda name: Fake()
-os.environ.update(KnowledgeBaseId="kb", ModelArn="m", GuardrailId="g", GuardrailVersion="1")
+os.environ.update(KnowledgeBaseId="kb", SonnetModelArn="m", HaikuModelArn="h", GuardrailId="g", GuardrailVersion="1")
 
 out = draft_reply.draft("q")
 assert calls["retrieve"]["retrievalConfiguration"]["managedSearchConfiguration"] == {
@@ -57,8 +57,22 @@ out2 = draft_reply.draft("q")
 assert out2["sources"][0]["subject"] == "Real subject"
 
 draft_reply.boto3.client = lambda name: Fake()
-draft_reply.draft("q", tenant="acme", variant="customer", n=2, model_arn="other")
+draft_reply.draft("q", tenant="acme", variant="customer", n=2, model="Haiku")
 assert calls["retrieve"]["retrievalConfiguration"]["managedSearchConfiguration"]["filter"] == {"andAll": [
     {"equals": {"key": "variant", "value": "customer"}}, {"equals": {"key": "tenant", "value": "acme"}}]}
-assert calls["converse"]["modelId"] == "other"
+assert calls["converse"]["modelId"] == "h"
+
+# Chunks of one ticket are grouped into one source, first (best) score kept.
+def retrieve_chunks(self, **kw):
+    return {"retrievalResults": [
+        {"content": {"text": "# S\n\npart 1"}, "score": 0.9, "metadata": {"ticketId": "T3", "tenant": "a", "variant": "full"}},
+        {"content": {"text": "other"}, "score": 0.8, "metadata": {"ticketId": "T4", "tenant": "a", "variant": "full"}},
+        {"content": {"text": "part 2"}, "score": 0.6, "metadata": {"ticketId": "T3", "tenant": "a", "variant": "full"}},
+    ]}
+
+
+draft_reply.boto3.client = lambda name: type("F", (), {"retrieve": retrieve_chunks})()
+grouped = draft_reply.retrieve("q")
+assert [s["ticketId"] for s in grouped] == ["T3", "T4"]
+assert grouped[0]["text"] == "# S\n\npart 1\n\npart 2" and grouped[0]["score"] == 0.9
 print("ok")
