@@ -274,7 +274,9 @@ set -a; source .env; set +a
    uv run etl/split_tickets.py data/super-admin.tickets.json out/ --limit 20
    ```
 
-   For the three tenant corpus, filter by tenant. `--limit` caps the total:
+   For the three tenant corpus, filter by tenant. `--limit` caps the total.
+   The Tenant drop-down in `demo/app.py` lists these three tenants; edit
+   `TENANTS` there if you ingest others:
 
    ```shell
    uv run etl/split_tickets.py data/super-admin.tickets.json out/ \

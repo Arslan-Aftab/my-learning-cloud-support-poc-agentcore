@@ -25,11 +25,13 @@ from botocore.exceptions import ClientError  # noqa: E402
 from draft_reply import generate, retrieve  # noqa: E402
 
 VARIANTS = {"Full ticket": "full", "Customer messages only": "customer"}
+# ponytail: the three tenants of the README ingest step, not a live list from the Knowledge Base.
+TENANTS = ["All tenants", "spf", "optalis", "stjudescare"]
 
 st.title("MLC support draft")
 model = st.sidebar.selectbox("Model", ["Sonnet", "Haiku"])
 variant = VARIANTS[st.sidebar.selectbox("Ticket contents", list(VARIANTS))]
-tenant = st.sidebar.text_input("Tenant (empty = all)")
+tenant = st.sidebar.selectbox("Tenant", TENANTS)
 n = st.sidebar.slider("Past tickets to search", 1, 10, 5)
 question = st.text_area("Paste the customer query", height=200, placeholder="The customer's message, as written.")
 
@@ -40,7 +42,7 @@ if st.button("Draft reply", type="primary") and question.strip():
     st.session_state.pop("out", None)
     try:
         with st.status("Searching past tickets…", expanded=True) as status:
-            sources = retrieve(question, tenant or None, variant, n)
+            sources = retrieve(question, None if tenant == TENANTS[0] else tenant, variant, n)
             st.write(f"Found {len(sources)} past tickets. Generating the draft with {model}…")
             out = generate(question, sources, model)
             status.update(label="Draft ready", state="complete", expanded=False)
