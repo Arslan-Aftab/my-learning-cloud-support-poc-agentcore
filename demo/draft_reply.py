@@ -84,7 +84,7 @@ def generate(question, sources, model="Sonnet"):
         f"### Ticket {s['ticketId']} {s['subject']} ({s['variant']}, score {s['score']:.2f})\n{s['text']}"
         for s in sources
     )
-    content = boto3.client("bedrock-runtime").converse(
+    response = boto3.client("bedrock-runtime").converse(
         modelId=env[f"{model}ModelArn"],
         system=[{"text": SYSTEM}],
         messages=[{"role": "user", "content": [
@@ -94,14 +94,28 @@ def generate(question, sources, model="Sonnet"):
         guardrailConfig={
             "guardrailIdentifier": env["GuardrailId"],
             "guardrailVersion": env["GuardrailVersion"],
-            "trace": "disabled",
+            "trace": "enabled",
         },
         outputConfig={"textFormat": {"type": "json_schema", "structure": {"jsonSchema": {
             "name": "draft", "schema": json.dumps(OUTPUT_SCHEMA)}}}},
-    )["output"]["message"]["content"]
+    )
+    grounding = grounding_scores(response.get("trace", {}))
     # Sonnet 5 emits a reasoningContent block before the text.
-    out = json.loads(next(b["text"] for b in content if "text" in b))
-    return {"label": out["label"], "notes": out["notes"], "draft": out["reply"]}
+    text = next(b["text"] for b in response["output"]["message"]["content"] if "text" in b)
+    if response["stopReason"] == "guardrail_intervened":
+        return {"label": "unclear", "notes": "", "draft": text, "blocked": True, "grounding": grounding}
+    out = json.loads(text)
+    return {"label": out["label"], "notes": out["notes"], "draft": out["reply"], "blocked": False, "grounding": grounding}
+
+
+def grounding_scores(trace):
+    """`{"GROUNDING": {"score": 0.4, "threshold": 0.5, "action": "BLOCKED"}, ...}` from a Guardrail trace."""
+    scores = {}
+    for assessment in trace.get("guardrail", {}).get("outputAssessments", {}).values():
+        for a in assessment:
+            for f in a.get("contextualGroundingPolicy", {}).get("filters", []):
+                scores[f["type"]] = {k: f[k] for k in ("score", "threshold", "action")}
+    return scores
 
 def draft(question, tenant=None, variant="full", n=5, model="Sonnet"):
     sources = retrieve(question, tenant, variant, n)

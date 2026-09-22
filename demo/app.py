@@ -56,9 +56,15 @@ if st.button("Draft reply", type="primary") and question.strip():
         st.session_state["out"] = {**out, "sources": sources}
 
 if out := st.session_state.get("out"):
+    if out["blocked"]:
+        st.error("The Guardrail blocked the draft. Scores below the threshold are the cause.")
     st.subheader(f"Query type: {out['label']}")
     if out["notes"]:
         st.info(out["notes"])
+    if out["grounding"]:
+        st.caption("Guardrail grounding check  " + "  ·  ".join(
+            f"{k.lower()} {v['score']:.2f} (threshold {v['threshold']:.2f}, {v['action'].lower()})"
+            for k, v in out["grounding"].items()))
     text = st.text_area("Reply to the customer (edit before you copy)", out["draft"], height=300)
     # ponytail: JSON in a script tag, not an attribute, so quotes in the reply survive.
     st.iframe(
