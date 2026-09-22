@@ -19,6 +19,7 @@ super-admin.tickets.json ──► etl/split_tickets.py ──► out/{full,cust
                                                      S3 bucket ──► Managed Knowledge Base
                                                                     (S3 connector)
 new ticket ──► demo/draft_reply.py ──► Retrieve ──► Converse + Guardrail ──► console
+           └─► demo/app.py (Streamlit, same pipeline) ──────────────────────► browser
 ```
 
 | Area | Decision | Why |
@@ -80,7 +81,8 @@ you want AgentCore Evaluations.
 | `etl/split_tickets.py` | Splits the export into per-ticket documents and metadata sidecars |
 | `tests/` | Self-check for the ETL, with one fixture ticket |
 | `infrastructure/template.yaml` | CloudFormation: bucket, Knowledge Base role, Knowledge Base, data source, Guardrail. |
-| `demo/` | One script per experiment. Not written yet. |
+| `demo/draft_reply.py` | Retrieve, Converse with the Guardrail, print the draft and the sources. |
+| `demo/app.py` | Local Streamlit page around the same pipeline. Paste a ticket, set tenant and variant, read the draft and the sources. |
 | `data/` | Local ticket export. Git ignores it. |
 | `out/` | ETL output. Git ignores it. |
 | `HANDOFF.md` | Open work and next steps. This file holds the status quo. |
@@ -245,6 +247,14 @@ draft that cites the ticket IDs it used and nothing sent anywhere.
 
 ```shell
 uv run demo/draft_reply.py "How do I view completion of a policy that is not mandatory?"
+```
+
+The same pipeline runs in a local browser page. Paste a ticket, set the
+tenant filter, the variant and the result count in the sidebar, and read the
+draft with one expander per source. Nothing is hosted.
+
+```shell
+uv run demo/app.py
 ```
 
 ### T4 Ask a question that surfaces PII
