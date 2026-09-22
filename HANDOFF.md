@@ -23,9 +23,9 @@ has not been tried in a browser.
 
 ## Next steps
 
-1. Load the full corpus. Run the ETL with no `--limit`, sync, ingest, and
-   check the job statistics against 13,900 documents.
-2. Open `demo/app.py` in a browser and run T4 and T5 through it.
+1. Open `demo/app.py` in a browser and run T4 and T5 through it (R20).
+2. Load the full corpus only after step 1. Run the ETL with no `--limit`,
+   sync, ingest, and check the job statistics against 13,900 documents.
 3. Pick the T4 questions from the real corpus: one whose matching tickets hold
    a personal name or a phone number, one whose tickets hold none.
 4. Re-run every test and update the requirements table.
@@ -33,11 +33,8 @@ has not been tried in a browser.
 
 ## Open decisions
 
-- The Sonnet 5 profile in `.env` returns `AccessDeniedException: Your account
-  is currently being verified`. Haiku works. Until AWS clears the account,
-  run with `ModelArn=eu.anthropic.claude-haiku-4-5-20251001-v1:0`, or write
-  that value into `.env`. Retry Sonnet after a day; email
-  aws-verification@amazon.com if it still fails.
+- Sonnet 5 is blocked by AWS account verification. See the README note under
+  Prerequisites. Retry it before the Sonnet against Haiku decision.
 - No `-ro` profile exists. Every command runs as admin today.
 - MLC staff see every tenant's tickets in the index. Customer isolation is
   unresolved, and it matters before anything leaves a demo.

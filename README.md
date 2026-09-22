@@ -116,6 +116,15 @@ Once per machine.
 
 Sign in before each session: `aws sso login --profile mlc-support-poc`.
 
+> **Note** A new account cannot call Claude Sonnet 5 until AWS has verified
+> it. The call fails with `AccessDeniedException: Your account is currently
+> being verified`. This is an AWS fraud check on new accounts, not a model
+> access setting. Haiku is not gated, so until the check clears put
+> `ModelArn=eu.anthropic.claude-haiku-4-5-20251001-v1:0` in `.env` in place
+> of the Sonnet ARN. To clear Sonnet: confirm the account has a valid payment
+> method, retry after two hours, and if it still fails email
+> aws-verification@amazon.com or open an AWS Support case.
+
 ## Deploying
 
 The template creates the ticket bucket, the Knowledge Base role, the managed
@@ -320,3 +329,4 @@ The Note column holds the evidence and the test that produced it.
 | R17 | Agentic retrieval: the agent reads the results, changes the metadata filter or the search terms, and queries again until it has useful sources | open | Spike. Needs an agent loop, so AgentCore or Strands over the current fixed pipeline. Compare draft quality and cost per ticket against the one-shot path. |
 | R18 | Batch processing to cut cost | open | Research. Bedrock batch inference is priced below on-demand. Fits a nightly run over new tickets, not the interactive front end. |
 | R19 | Ground every draft in the retrieved tickets and minimise hallucination | open | Research. First candidate: the Guardrail contextual grounding check, which scores grounding and relevance against the source chunks. Second: the LLM judge from R10. |
+| R20 | Detailed testing on the 20 ticket sample before the full corpus is loaded | open | Run T3 to T5 across every class and both variants on the sample first. The full load waits for that. |
