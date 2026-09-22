@@ -38,8 +38,8 @@ new ticket ──► demo/draft_reply.py ──► Retrieve ──► Converse +
 | Bad tickets | Keep all. Store `reopened` as metadata. Test with and without a filter. | Scott's "closed twice" heuristic is a signal, not a verdict. |
 
 Add AgentCore only when Lumis calls the tool over HTTP, when the agent needs the
-Lumis API through a Gateway with permissions separate from a user token, or when
-you want AgentCore Evaluations.
+Lumis API through a Gateway with permissions separate from a user token, when
+you want AgentCore Evaluations, or for the retrieval loop in R17.
 
 ## Findings
 
@@ -296,8 +296,8 @@ charges only.
 
 `implemented` = built and shown to work. `partial` = part of the path is
 proven. `validated` = not built, but the docs or a spike show it works. `out` =
-not possible or out of scope. The Note column holds the evidence and the test
-that produced it.
+not possible or out of scope. `open` = agreed as a goal or a spike, not started.
+The Note column holds the evidence and the test that produced it.
 
 | # | Requirement | Status | Note |
 | --- | --- | --- | --- |
@@ -317,3 +317,6 @@ that produced it.
 | R14 | Handle customer-specific jargon | out | Revisit after evaluation. Tenant metadata filter is the first idea. |
 | R15 | Daily re-sync of new tickets | out | Manual re-run of ETL and sync job in the PoC. |
 | R16 | Ground-truth knowledge base or how-to wiki | out | Deferred at the deep dive. |
+| R17 | Agentic retrieval: the agent reads the results, changes the metadata filter or the search terms, and queries again until it has useful sources | open | Spike. Needs an agent loop, so AgentCore or Strands over the current fixed pipeline. Compare draft quality and cost per ticket against the one-shot path. |
+| R18 | Batch processing to cut cost | open | Research. Bedrock batch inference is priced below on-demand. Fits a nightly run over new tickets, not the interactive front end. |
+| R19 | Ground every draft in the retrieved tickets and minimise hallucination | open | Research. First candidate: the Guardrail contextual grounding check, which scores grounding and relevance against the source chunks. Second: the LLM judge from R10. |
