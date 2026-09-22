@@ -37,6 +37,8 @@ model = st.sidebar.selectbox("Model", ["Sonnet", "Haiku"])
 variant = VARIANTS[st.sidebar.selectbox("Ticket contents", list(VARIANTS))]
 tenant = st.sidebar.selectbox("Tenant", TENANTS)
 n = st.sidebar.slider("Past tickets to search", 1, 10, 5)
+threshold = st.sidebar.slider("Grounding threshold", 0.0, 1.0, 0.5, 0.05,
+                              help="A draft scoring below this on grounding or relevance is withheld.")
 question = st.text_area("Paste the customer query", height=200, placeholder="The customer's message, as written.")
 
 if "out" in st.session_state:
@@ -56,16 +58,18 @@ if st.button("Draft reply", type="primary") and question.strip():
         st.session_state["out"] = {**out, "sources": sources}
 
 if out := st.session_state.get("out"):
+    weak = [k.lower() for k, v in out["grounding"].items() if v["score"] < threshold]
     if out["blocked"]:
-        st.error("The Guardrail blocked the draft. Scores below the threshold are the cause.")
+        st.error("The Guardrail refused the question as off topic.")
+    elif weak:
+        st.error(f"Draft withheld: {' and '.join(weak)} scored below {threshold:.2f}. Lower the threshold to see it.")
     st.subheader(f"Query type: {out['label']}")
     if out["notes"]:
         st.info(out["notes"])
     if out["grounding"]:
-        st.caption("Guardrail grounding check  " + "  ·  ".join(
-            f"{k.lower()} {v['score']:.2f} (threshold {v['threshold']:.2f}, {v['action'].lower()})"
-            for k, v in out["grounding"].items()))
-    text = st.text_area("Reply to the customer (edit before you copy)", out["draft"], height=300)
+        st.caption("Grounding scores  " + "  ·  ".join(f"{k.lower()} {v['score']:.2f}" for k, v in out["grounding"].items()))
+    draft = "" if weak else out["draft"]
+    text = st.text_area("Reply to the customer (edit before you copy)", draft, height=300)
     # ponytail: JSON in a script tag, not an attribute, so quotes in the reply survive.
     st.iframe(
         f"<script>const reply = {json.dumps(text).replace('<', '\\u003c')};</script>"
