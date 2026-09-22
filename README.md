@@ -207,7 +207,7 @@ The Note column names the demo scenario and the date that proved it.
 | R7 | Signpost for `tenant-data` tickets: name the screen and the data to request | implemented | "Ask for data the customer must supply" scenario, Sonnet 5, customer variant (2026-09-22): draft named the screen (`Compliance Matrix Report`) and listed the roles, locations, tenant name and browser to request. |
 | R8 | Human review of every draft | validated | Output is console or page text. Nothing is sent. |
 | R9 | Data stays in UK or EU | validated | `eu-west-2` plus `eu.` inference profile. |
-| R10 | Evaluate drafts against real MLC replies on held-out tickets | partial | Path chosen: Bedrock Evaluations, retrieve-and-generate RAG job, bring your own inference responses (see Findings). Not built. |
+| R10 | Evaluate drafts against real MLC replies on held-out tickets | partial | `tools/evaluate.py`, see `docs/evaluation.md` (2026-09-22): `dataset` step built and validated, 20 held-out tickets, drafted with `Retrieve` plus `Converse`. `upload` and `start` need approval to write S3 and to run a billed job; not run yet. |
 | R11 | Keep idle infra cost near zero | validated | Managed Knowledge Base bills storage and retrievals only. |
 | R12 | Answer questions that need live tenant data from Lumis | out | No Lumis API in scope. The draft asks the customer for the data. |
 | R13 | Write suggestions back into Lumis | out | Kick-off decision. |
@@ -390,6 +390,7 @@ R10 evaluation job and compare price against quality.
 | `demo/draft_reply.py` | Retrieve, Converse with the Guardrail, print the draft and the sources. |
 | `demo/agentic_reply.py` | R17 spike of `AgenticRetrieveStream`. No-go, kept as evidence. |
 | `demo/app.py` | Local Streamlit page around the same pipeline. See Demo above. |
+| `tools/evaluate.py` | R10: builds, uploads and starts the Bedrock Evaluations RAG job. See `docs/evaluation.md`. |
 | `data/` | Local ticket export. Git ignores it. |
 | `out/` | ETL output. Git ignores it. |
 | `HANDOFF.md` | Open work and next steps. This file holds the status quo. |
