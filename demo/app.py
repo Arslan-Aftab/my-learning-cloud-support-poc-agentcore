@@ -29,6 +29,10 @@ VARIANTS = {"Full ticket": "full", "Customer messages only": "customer"}
 TENANTS = ["All tenants", "spf", "optalis", "stjudescare"]
 
 st.title("MLC support draft")
+missing = [k for k in ("KnowledgeBaseId", "GuardrailId", "GuardrailVersion", "SonnetModelArn", "HaikuModelArn") if k not in os.environ]
+if missing:
+    st.error(f"Missing in the environment: {', '.join(missing)}. Run `set -a; source .env; set +a` and restart.")
+    st.stop()
 model = st.sidebar.selectbox("Model", ["Sonnet", "Haiku"])
 variant = VARIANTS[st.sidebar.selectbox("Ticket contents", list(VARIANTS))]
 tenant = st.sidebar.selectbox("Tenant", TENANTS)
