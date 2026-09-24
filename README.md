@@ -260,6 +260,11 @@ you want AgentCore Evaluations, or for the retrieval loop in R17.
   `"true"` and `"false"` strings. The flat format is ignored.
 - Managed Knowledge Base metadata filters support `equals`, `in`, `notIn` and
   range operators. `startsWith` and `stringContains` are not supported.
+  `managedSearchConfiguration.filter` is a
+  [`RetrievalFilter`](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_agent-runtime_ManagedSearchConfiguration.html),
+  so `andAll` and `orAll` nest conditions, for example `variant` and (one
+  tenant or `public` is `"true"`). The filter runs in our code, so it is not an
+  access control.
 - The ingestion job statistics do not explain a failed document. Per-document
   reasons are in the ingestion log group that the stack creates.
 - A managed Knowledge Base rejects the plain `S3` data source type. Use
