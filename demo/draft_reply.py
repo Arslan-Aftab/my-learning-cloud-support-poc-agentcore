@@ -113,9 +113,12 @@ def generate(question, sources, model="Sonnet"):
     try:
         out = json.loads(text.strip().removeprefix("```json").removesuffix("```"))
     except ValueError:
-        # Prompted JSON can fail; show the raw text rather than nothing.
-        out = {"label": "unclear", "notes": "", "reply": text}
-    return {"label": out["label"], "notes": out["notes"], "draft": out["reply"], "blocked": False, "grounding": grounding}
+        out = None
+    # Prompted JSON can fail or miss keys; show the raw text rather than nothing.
+    if not isinstance(out, dict) or "reply" not in out:
+        out = {"reply": text}
+    return {"label": out.get("label", "unclear"), "notes": out.get("notes", ""), "draft": out["reply"],
+            "blocked": False, "grounding": grounding}
 
 
 def grounding_scores(trace):
