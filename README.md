@@ -390,6 +390,7 @@ R10 evaluation job and compare price against quality.
 | `demo/draft_reply.py` | Retrieve, Converse with the Guardrail, print the draft and the sources. |
 | `demo/agentic_reply.py` | R17 spike of `AgenticRetrieveStream`. No-go, kept as evidence. |
 | `demo/app.py` | Local Streamlit page around the same pipeline. See Demo above. |
+| `tools/cost_model.py` | Writes `out/cost-model.xlsx`, the R22 interactive cost estimate. See `docs/cost-model.md`. |
 | `data/` | Local ticket export. Git ignores it. |
 | `out/` | ETL output. Git ignores it. |
 | `HANDOFF.md` | Open work and next steps. This file holds the status quo. |
