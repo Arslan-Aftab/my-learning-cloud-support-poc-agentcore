@@ -62,6 +62,11 @@ assert "outputConfig" not in calls["converse"] and '"enum"' in calls["converse"]
 prose = {"stopReason": "end_turn", "output": {"message": {"content": [{"text": "Hi,\nDo this."}]}}}
 draft_reply.boto3.client = lambda name: type("F", (), {"converse": lambda self, **kw: prose})()
 assert draft_reply.generate("q", [])["draft"] == "Hi,\nDo this."
+# JSON with missing keys, or not an object, falls back too.
+for text, want in [('{"reply": "Do this."}', "Do this."), ('{"answer": "x"}', '{"answer": "x"}'), ("42", "42")]:
+    prose["output"]["message"]["content"][0]["text"] = text
+    got = draft_reply.generate("q", [])
+    assert got["draft"] == want and got["label"] == "unclear" and got["notes"] == "", got
 draft_reply.boto3.client = lambda name: Fake()
 content = calls["converse"]["messages"][0]["content"]
 grounding = content[0]["guardContent"]["text"]
